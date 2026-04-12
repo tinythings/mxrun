@@ -55,7 +55,7 @@ struct AppLoop<'a> {
     terminal: &'a mut Terminal<CrosstermBackend<std::io::Stdout>>,
     active_pane: usize,
     scrollbacks: Vec<usize>,
-    popup_open: bool,
+    popup: Option<PopupState>,
     popup_dismissed: bool,
 }
 
@@ -75,7 +75,7 @@ impl<'a> AppLoop<'a> {
             terminal,
             active_pane: 0,
             scrollbacks: vec![0; pane_count],
-            popup_open: false,
+            popup: None,
             popup_dismissed: false,
         }
     }
@@ -122,7 +122,7 @@ impl<'a> AppLoop<'a> {
                     self.states,
                     self.active_pane,
                     &self.scrollbacks,
-                    self.popup_open,
+                    self.popup,
                 )
                 .render(frame)
             })
@@ -132,7 +132,7 @@ impl<'a> AppLoop<'a> {
 
     fn refresh_popup(&mut self) {
         if self.all_finished() && !self.popup_dismissed {
-            self.popup_open = true;
+            self.popup = Some(PopupState::Finished);
         }
     }
 
@@ -149,7 +149,7 @@ impl<'a> AppLoop<'a> {
     }
 
     fn exit_code_or_abort(&self, key: KeyPress) -> i32 {
-        if !self.all_finished() && key.should_quit() {
+        if !self.all_finished() && key.should_abort_confirmed() {
             130
         } else {
             self.exit_code()
@@ -164,12 +164,12 @@ impl<'a> AppLoop<'a> {
         if !self.all_finished() {
             return self.handle_live_key(key);
         }
-        if self.popup_open {
+        if self.popup.is_some() {
             if key.should_quit_finished() {
                 self.cleanup_logs_for(key);
                 return true;
             }
-            self.popup_open = false;
+            self.popup = None;
             self.popup_dismissed = true;
             return false;
         }
@@ -177,7 +177,18 @@ impl<'a> AppLoop<'a> {
     }
 
     fn handle_live_key(&mut self, key: KeyPress) -> bool {
-        if key.should_quit() {
+        if self.popup == Some(PopupState::AbortConfirm) {
+            if key.should_abort_confirmed() {
+                return true;
+            }
+            self.popup = None;
+            return false;
+        }
+        if key.should_abort_requested() {
+            self.popup = Some(PopupState::AbortConfirm);
+            return false;
+        }
+        if key.should_quit_live() {
             return true;
         }
         key.navigation()
@@ -250,6 +261,12 @@ impl<'a> AppLoop<'a> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PopupState {
+    Finished,
+    AbortConfirm,
+}
+
 #[derive(Clone, Copy)]
 struct KeyPress {
     code: KeyCode,
@@ -273,6 +290,18 @@ impl KeyPress {
 
     fn should_quit(&self) -> bool {
         self.is_escape() || self.is_any_quit_char() || self.is_ctrl_c()
+    }
+
+    fn should_quit_live(&self) -> bool {
+        self.is_escape() || self.is_any_quit_char()
+    }
+
+    fn should_abort_requested(&self) -> bool {
+        self.is_ctrl_c()
+    }
+
+    fn should_abort_confirmed(&self) -> bool {
+        self.is_ctrl_c() || self.is_abort_yes()
     }
 
     fn should_quit_finished(&self) -> bool {
@@ -326,6 +355,10 @@ impl KeyPress {
 
     fn is_preserve_quit(&self) -> bool {
         self.code == KeyCode::Char('p')
+    }
+
+    fn is_abort_yes(&self) -> bool {
+        matches!(self.code, KeyCode::Char('y') | KeyCode::Char('Y'))
     }
 }
 

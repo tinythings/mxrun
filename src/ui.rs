@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::app::{JobStage, JobState};
+use crate::app::{JobStage, JobState, PopupState};
 
 #[cfg(test)]
 use crate::runner::BuildPlan;
@@ -45,7 +45,7 @@ impl<'a> BuildScreen<'a> {
         states: &'a [JobState],
         active_pane: usize,
         scrollbacks: &[usize],
-        popup_open: bool,
+        popup: Option<PopupState>,
     ) -> Self {
         Self {
             tiles: states
@@ -59,7 +59,7 @@ impl<'a> BuildScreen<'a> {
                     )
                 })
                 .collect(),
-            popup: popup_open.then_some(FinishPopup::done()),
+            popup: popup.map(FinishPopup::from_state),
         }
     }
 
@@ -369,9 +369,14 @@ pub struct FinishPopup {
 }
 
 impl FinishPopup {
-    pub fn done() -> Self {
-        Self {
-            text: "Press ^C to quit, \"p\" to quit and preserve logs, any key to continue",
+    pub fn from_state(state: PopupState) -> Self {
+        match state {
+            PopupState::Finished => Self {
+                text: "Press ^C to quit, \"p\" to quit and preserve logs, any key to continue",
+            },
+            PopupState::AbortConfirm => Self {
+                text: "^C again or \"y\" to abort the running farm, any key to continue",
+            },
         }
     }
 
@@ -380,7 +385,7 @@ impl FinishPopup {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::White))
-            .style(Style::default().bg(Color::Cyan));
+            .style(self.block_style());
         let inner = block.inner(area);
 
         frame.render_widget(Clear, area);
@@ -388,7 +393,7 @@ impl FinishPopup {
         frame.render_widget(
             Paragraph::new(Line::styled(
                 self.text,
-                Style::default().bg(Color::Cyan).fg(Color::White),
+                self.text_style(),
             ))
             .wrap(Wrap { trim: false }),
             inner,
@@ -402,6 +407,22 @@ impl FinishPopup {
             .saturating_add(4)
             .try_into()
             .unwrap_or(u16::MAX)
+    }
+
+    fn block_style(&self) -> Style {
+        self.is_abort()
+            .then_some(Style::default().bg(Color::Red))
+            .unwrap_or_else(|| Style::default().bg(Color::Cyan))
+    }
+
+    fn text_style(&self) -> Style {
+        self.is_abort()
+            .then_some(Style::default().bg(Color::Red).fg(Color::White))
+            .unwrap_or_else(|| Style::default().bg(Color::Cyan).fg(Color::White))
+    }
+
+    fn is_abort(&self) -> bool {
+        self.text.contains("abort the running farm")
     }
 }
 
