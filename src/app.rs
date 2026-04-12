@@ -27,13 +27,15 @@ const IDLE_MS: u64 = 16;
 pub struct XrunApp {
     plan: BuildPlan,
     states: Vec<JobState>,
+    wrap_lines: bool,
 }
 
 impl XrunApp {
-    pub fn new(plan: BuildPlan) -> Self {
+    pub fn new(plan: BuildPlan, wrap_lines: bool) -> Self {
         Self {
             states: plan.jobs().iter().map(JobState::from_job).collect(),
             plan,
+            wrap_lines,
         }
     }
 
@@ -41,7 +43,14 @@ impl XrunApp {
         TerminalGuard::enter().and_then(|mut terminal| {
             JobSupervisor::new(&self.plan).spawn().and_then(|events| {
                 InputReader::spawn().and_then(|keys| {
-                    AppLoop::new(&mut self.states, events, keys, terminal.terminal_mut()).run()
+                    AppLoop::new(
+                        &mut self.states,
+                        events,
+                        keys,
+                        terminal.terminal_mut(),
+                        self.wrap_lines,
+                    )
+                    .run()
                 })
             })
         })
@@ -57,6 +66,7 @@ struct AppLoop<'a> {
     scrollbacks: Vec<usize>,
     popup: Option<PopupState>,
     popup_dismissed: bool,
+    wrap_lines: bool,
 }
 
 impl<'a> AppLoop<'a> {
@@ -65,6 +75,7 @@ impl<'a> AppLoop<'a> {
         events: Receiver<JobEvent>,
         keys: Receiver<KeyPress>,
         terminal: &'a mut Terminal<CrosstermBackend<std::io::Stdout>>,
+        wrap_lines: bool,
     ) -> Self {
         let pane_count = states.len();
 
@@ -77,6 +88,7 @@ impl<'a> AppLoop<'a> {
             scrollbacks: vec![0; pane_count],
             popup: None,
             popup_dismissed: false,
+            wrap_lines,
         }
     }
 
@@ -123,6 +135,7 @@ impl<'a> AppLoop<'a> {
                     self.active_pane,
                     &self.scrollbacks,
                     self.popup,
+                    self.wrap_lines,
                 )
                 .render(frame)
             })

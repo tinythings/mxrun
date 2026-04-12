@@ -46,6 +46,7 @@ impl<'a> BuildScreen<'a> {
         active_pane: usize,
         scrollbacks: &[usize],
         popup: Option<PopupState>,
+        wrap_lines: bool,
     ) -> Self {
         Self {
             tiles: states
@@ -56,6 +57,7 @@ impl<'a> BuildScreen<'a> {
                         state,
                         index == active_pane,
                         *scrollbacks.get(index).unwrap_or(&0),
+                        wrap_lines,
                     )
                 })
                 .collect(),
@@ -103,11 +105,11 @@ impl<'a> BuildTile<'a> {
         }
     }
 
-    pub fn from_state(state: &'a JobState, active: bool, scrollback: usize) -> Self {
+    pub fn from_state(state: &'a JobState, active: bool, scrollback: usize, wrap_lines: bool) -> Self {
         Self {
             active,
             status: TileStatus::from_state(state),
-            viewport: TileViewport::from_lines(state.log_lines(), scrollback),
+            viewport: TileViewport::from_lines(state.log_lines(), scrollback, wrap_lines),
         }
     }
 
@@ -196,6 +198,7 @@ impl TileStatus {
 pub struct TileViewport<'a> {
     lines: TileLines<'a>,
     scrollback: usize,
+    wrap_lines: bool,
 }
 
 #[cfg(test)]
@@ -204,26 +207,29 @@ impl TileViewport<'static> {
         Self {
             lines: TileLines::Owned(Vec::new()),
             scrollback: 0,
+            wrap_lines: false,
         }
     }
 
     pub fn from_ansi(source: &str, scrollback: usize) -> Self {
-        Self::from_owned_lines(crate::ansi::AnsiDocument::parse(source).lines(), scrollback)
+        Self::from_owned_lines(crate::ansi::AnsiDocument::parse(source).lines(), scrollback, false)
     }
 
-    fn from_owned_lines(lines: Vec<Line<'static>>, scrollback: usize) -> Self {
+    fn from_owned_lines(lines: Vec<Line<'static>>, scrollback: usize, wrap_lines: bool) -> Self {
         Self {
             lines: TileLines::Owned(lines),
             scrollback,
+            wrap_lines,
         }
     }
 }
 
 impl<'a> TileViewport<'a> {
-    pub fn from_lines(lines: &'a [Line<'static>], scrollback: usize) -> Self {
+    pub fn from_lines(lines: &'a [Line<'static>], scrollback: usize, wrap_lines: bool) -> Self {
         Self {
             lines: TileLines::Borrowed(lines),
             scrollback,
+            wrap_lines,
         }
     }
 
@@ -235,10 +241,14 @@ impl<'a> TileViewport<'a> {
         let visible_lines = self.visible_lines(inner);
 
         frame.render_widget(block, area);
-        frame.render_widget(
-            Paragraph::new(visible_lines).wrap(Wrap { trim: false }),
-            inner,
-        );
+        if self.wrap_lines {
+            frame.render_widget(
+                Paragraph::new(visible_lines).wrap(Wrap { trim: false }),
+                inner,
+            );
+        } else {
+            frame.render_widget(Paragraph::new(visible_lines), inner);
+        }
     }
 
     #[cfg(test)]
@@ -258,12 +268,73 @@ impl<'a> TileViewport<'a> {
         let lines = self.lines.as_slice();
         let end = lines.len().saturating_sub(self.scrollback);
         let start = end.saturating_sub(self.inner_height(area));
+        let width = area.width as usize;
 
-        lines[start..end].to_vec()
+        lines[start..end]
+            .iter()
+            .map(|line| {
+                if self.wrap_lines {
+                    line.clone()
+                } else {
+                    Self::truncate_line(line, width)
+                }
+            })
+            .collect()
     }
 
     fn inner_height(&self, area: Rect) -> usize {
         area.height as usize
+    }
+
+    fn truncate_line(line: &Line<'static>, width: usize) -> Line<'static> {
+        if width == 0 {
+            return Line::default();
+        }
+
+        let visible_width = Self::line_width(line);
+        if visible_width <= width {
+            return line.clone();
+        }
+
+        if width <= 3 {
+            return Line::from(vec![Span::raw(".".repeat(width))]);
+        }
+
+        let keep = width - 3;
+        let mut visible = 0usize;
+        let mut spans = Vec::new();
+        let mut ellipsis_style = Style::default();
+
+        for span in &line.spans {
+            let span_width = span.content.chars().count();
+
+            if visible + span_width <= keep {
+                if span_width > 0 {
+                    ellipsis_style = span.style;
+                }
+                visible += span_width;
+                spans.push(span.clone());
+                continue;
+            }
+
+            let remaining = keep.saturating_sub(visible);
+            if remaining > 0 {
+                let text = span.content.chars().take(remaining).collect::<String>();
+                ellipsis_style = span.style;
+                spans.push(Span::styled(text, span.style));
+            }
+            break;
+        }
+
+        spans.push(Span::styled("...", ellipsis_style));
+        Line::from(spans)
+    }
+
+    fn line_width(line: &Line<'static>) -> usize {
+        line.spans
+            .iter()
+            .map(|span| span.content.chars().count())
+            .sum()
     }
 
     fn border_style(&self, active: bool) -> Style {

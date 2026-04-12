@@ -51,6 +51,7 @@ struct RunOptions {
     entry: String,
     mirror_results: bool,
     mirror_root: PathBuf,
+    wrap_lines: bool,
 }
 
 impl Command {
@@ -83,14 +84,17 @@ impl Command {
 
     fn run_entry(&self, options: &RunOptions) -> i32 {
         options.announce_mirroring_contract();
-        XrunApp::new(BuildPlan::new(
-            &ConfigFile::load(),
-            options.entry(),
-            &RepoRoot::path(),
-            &LogRoot::path(options.entry()),
-            &LocalMake::name(),
-            options.mirror_plan(),
-        ))
+        XrunApp::new(
+            BuildPlan::new(
+                &ConfigFile::load(),
+                options.entry(),
+                &RepoRoot::path(),
+                &LogRoot::path(options.entry()),
+                &LocalMake::name(),
+                options.mirror_plan(),
+            ),
+            options.wrap_lines(),
+        )
         .run()
         .unwrap_or_else(|err| Fatal::raise(&err))
     }
@@ -139,6 +143,7 @@ impl RunOptions {
             entry: clidef::entry(am),
             mirror_results,
             mirror_root: mirror_root.unwrap_or_else(Self::default_mirror_root),
+            wrap_lines: clidef::wrap_lines(am),
         }
     }
 
@@ -156,6 +161,10 @@ impl RunOptions {
 
     fn mirror_root(&self) -> &PathBuf {
         &self.mirror_root
+    }
+
+    fn wrap_lines(&self) -> bool {
+        self.wrap_lines
     }
 
     fn announce_mirroring_contract(&self) {

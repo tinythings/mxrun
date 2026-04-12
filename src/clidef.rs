@@ -43,6 +43,12 @@ pub fn cli() -> Command {
                         .long("mirror-root")
                         .value_name("DIR")
                         .help("Override the local root directory used for mirrored results; default is ./target/xrun"),
+                )
+                .arg(
+                    Arg::new("wrap-lines")
+                        .long("wrap-lines")
+                        .action(ArgAction::SetTrue)
+                        .help("Wrap log lines in the viewport instead of trimming them with ..."),
                 ),
         )
         .next_help_heading("Other")
@@ -88,6 +94,13 @@ pub fn mirror_root(am: &ArgMatches) -> Option<PathBuf> {
     am.subcommand_matches("run")
         .and_then(|sub| sub.get_one::<String>("mirror-root"))
         .map(PathBuf::from)
+}
+
+pub fn wrap_lines(am: &ArgMatches) -> bool {
+    am.subcommand_matches("run")
+        .and_then(|sub| sub.get_one::<bool>("wrap-lines"))
+        .copied()
+        .unwrap_or(false)
 }
 
 pub fn add_host(am: &ArgMatches) -> Option<String> {
