@@ -410,15 +410,19 @@ impl FinishPopup {
     }
 
     fn block_style(&self) -> Style {
-        self.is_abort()
-            .then_some(Style::default().bg(Color::Red))
-            .unwrap_or_else(|| Style::default().bg(Color::Cyan))
+        if self.is_abort() {
+            Style::default().bg(Color::Red)
+        } else {
+            Style::default().bg(Color::Cyan)
+        }
     }
 
     fn text_style(&self) -> Style {
-        self.is_abort()
-            .then_some(Style::default().bg(Color::Red).fg(Color::White))
-            .unwrap_or_else(|| Style::default().bg(Color::Cyan).fg(Color::White))
+        if self.is_abort() {
+            Style::default().bg(Color::Red).fg(Color::White)
+        } else {
+            Style::default().bg(Color::Cyan).fg(Color::White)
+        }
     }
 
     fn is_abort(&self) -> bool {

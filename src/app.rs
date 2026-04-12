@@ -288,10 +288,6 @@ impl KeyPress {
         }
     }
 
-    fn should_quit(&self) -> bool {
-        self.is_escape() || self.is_any_quit_char() || self.is_ctrl_c()
-    }
-
     fn should_quit_live(&self) -> bool {
         self.is_escape() || self.is_any_quit_char()
     }

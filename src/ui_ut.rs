@@ -176,7 +176,12 @@ fn build_screen_renders_finish_popup_when_requested() {
         .iter()
         .map(crate::app::JobState::from_job)
         .collect::<Vec<_>>();
-    let screen = BuildScreen::from_states(&states, 0, &[0, 0], true);
+    let screen = BuildScreen::from_states(
+        &states,
+        0,
+        &[0, 0],
+        Some(crate::app::PopupState::Finished),
+    );
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).expect("test terminal should be created");
 
