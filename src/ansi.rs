@@ -3,10 +3,12 @@ use ratatui::{
     text::{Line, Span},
 };
 
+#[cfg(test)]
 pub struct AnsiDocument {
     lines: Vec<AnsiLine>,
 }
 
+#[cfg(test)]
 impl AnsiDocument {
     pub fn parse(text: &str) -> Self {
         Self::from_buffer(TerminalBuffer::from_text(text))
@@ -43,6 +45,7 @@ impl TerminalBuffer {
         }
     }
 
+    #[cfg(test)]
     pub fn from_text(text: &str) -> Self {
         let mut buffer = Self::new();
         buffer.push_text(text);
@@ -87,7 +90,7 @@ impl TerminalBuffer {
     fn consume_csi(&mut self, chars: &mut std::str::Chars<'_>) {
         let mut payload = String::new();
 
-        while let Some(ch) = chars.next() {
+        for ch in chars.by_ref() {
             if Self::is_csi_final(ch) {
                 self.apply_csi(&payload, ch);
                 return;
@@ -229,16 +232,13 @@ impl TerminalBuffer {
         ranges
     }
 
-    fn skip_csi(
-        &self,
-        chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
-    ) {
-        while let Some((_, marker)) = chars.next() {
+    fn skip_csi(&self, chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
+        for (_, marker) in chars.by_ref() {
             if marker == '[' {
                 break;
             }
         }
-        while let Some((_, marker)) = chars.next() {
+        for (_, marker) in chars.by_ref() {
             if Self::is_csi_final(marker) {
                 break;
             }
@@ -356,30 +356,26 @@ impl<'a> AnsiParser<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct AnsiState {
     fg: Option<Color>,
     bold: bool,
 }
 
-impl Default for AnsiState {
-    fn default() -> Self {
-        Self {
-            fg: None,
-            bold: false,
-        }
-    }
-}
-
 impl AnsiState {
     fn apply(&self, codes: &[u16]) -> Self {
-        codes.iter().fold(*self, |state, code| state.apply_code(*code))
+        codes
+            .iter()
+            .fold(*self, |state, code| state.apply_code(*code))
     }
 
     fn apply_code(&self, code: u16) -> Self {
         match code {
             0 => Self::default(),
-            1 => Self { bold: true, ..*self },
+            1 => Self {
+                bold: true,
+                ..*self
+            },
             22 => Self {
                 bold: false,
                 ..*self
@@ -457,10 +453,10 @@ impl AnsiState {
         self.fg
             .map(|fg| Style::default().fg(fg))
             .unwrap_or_default()
-            .add_modifier(
-                self.bold
-                    .then_some(Modifier::BOLD)
-                    .unwrap_or(Modifier::empty()),
-            )
+            .add_modifier(if self.bold {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            })
     }
 }

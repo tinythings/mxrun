@@ -96,6 +96,7 @@ impl BuildJob {
         &self.target
     }
 
+    #[cfg(test)]
     pub fn command(&self) -> &BuildCommand {
         &self.command
     }
@@ -104,22 +105,24 @@ impl BuildJob {
         &self.log_path
     }
 
+    #[cfg(test)]
     pub fn run(&self) -> Result<JobResult, String> {
         fs::create_dir_all(self.log_path.parent().unwrap_or_else(|| Path::new(".")))
             .map_err(|err| format!("xrun: failed to create log directory: {err}"))?;
         self.reset_log_file()?;
         self.prepare().and_then(|_| {
             self.run_build().and_then(|status| {
-                (status == 0)
-                    .then_some(
-                        self.run_mirror()
-                            .map(|_| JobResult::new(self.log_path.clone(), status)),
-                    )
-                    .unwrap_or_else(|| Ok(JobResult::new(self.log_path.clone(), status)))
+                if status == 0 {
+                    self.run_mirror()
+                        .map(|_| JobResult::new(self.log_path.clone(), status))
+                } else {
+                    Ok(JobResult::new(self.log_path.clone(), status))
+                }
             })
         })
     }
 
+    #[cfg(test)]
     fn reset_log_file(&self) -> Result<(), String> {
         File::options()
             .create(true)
@@ -133,10 +136,11 @@ impl BuildJob {
     pub(crate) fn prepare(&self) -> Result<(), String> {
         fs::create_dir_all(self.log_path.parent().unwrap_or_else(|| Path::new(".")))
             .map_err(|err| format!("xrun: failed to create log directory: {err}"))?;
-        self.target
-            .is_local()
-            .then_some(Ok(()))
-            .unwrap_or_else(|| RemoteSync::new(&self.root_dir, &self.target).run(&self.log_path))
+        if self.target.is_local() {
+            Ok(())
+        } else {
+            RemoteSync::new(&self.root_dir, &self.target).run(&self.log_path)
+        }
     }
 
     pub(crate) fn run_build(&self) -> Result<i32, String> {
@@ -144,13 +148,11 @@ impl BuildJob {
     }
 
     pub(crate) fn run_mirror(&self) -> Result<(), String> {
-        self.mirror_plan
-            .is_enabled()
-            .then_some(
-                ResultMirror::new(&self.root_dir, &self.target, &self.mirror_plan)
-                    .run(&self.log_path),
-            )
-            .unwrap_or_else(|| Ok(()))
+        if self.mirror_plan.is_enabled() {
+            ResultMirror::new(&self.root_dir, &self.target, &self.mirror_plan).run(&self.log_path)
+        } else {
+            Ok(())
+        }
     }
 
     pub(crate) fn should_mirror_results(&self) -> bool {
@@ -189,10 +191,11 @@ impl BuildCommand {
         root_dir: &Path,
         local_make: &str,
     ) -> Self {
-        target
-            .is_local()
-            .then_some(Self::local(entry, root_dir, local_make))
-            .unwrap_or_else(|| Self::remote(target, entry, root_dir))
+        if target.is_local() {
+            Self::local(entry, root_dir, local_make)
+        } else {
+            Self::remote(target, entry, root_dir)
+        }
     }
 
     pub fn program(&self) -> &str {
@@ -329,10 +332,10 @@ impl<'a> ResultMirror<'a> {
         let mirror_target = self.resolve_target()?;
         let manifest_entries = self.manifest_entries()?;
 
-        manifest_entries
-            .is_empty()
-            .then_some(Ok(()))
-            .unwrap_or_else(|| {
+        if manifest_entries.is_empty() {
+            Ok(())
+        } else {
+            {
                 self.log_mirror_header(&mirror_target, log_path)
                     .and_then(|_| {
                         manifest_entries
@@ -351,14 +354,16 @@ impl<'a> ResultMirror<'a> {
                                     .and_then(|_| self.mirror_path(&mirror_target, path, log_path))
                             })
                     })
-            })
+            }
+        }
     }
 
     fn manifest_entries(&self) -> Result<Vec<PathBuf>, String> {
-        self.target
-            .is_local()
-            .then_some(self.local_manifest_entries())
-            .unwrap_or_else(|| self.remote_manifest_entries())
+        if self.target.is_local() {
+            self.local_manifest_entries()
+        } else {
+            self.remote_manifest_entries()
+        }
     }
 
     fn local_manifest_entries(&self) -> Result<Vec<PathBuf>, String> {
@@ -422,9 +427,11 @@ impl<'a> ResultMirror<'a> {
     }
 
     fn resolve_os_label(&self) -> Result<String, String> {
-        self.is_linux_target()
-            .then_some(self.resolve_linux_label())
-            .unwrap_or_else(|| self.resolve_bsd_label())
+        if self.is_linux_target() {
+            self.resolve_linux_label()
+        } else {
+            self.resolve_bsd_label()
+        }
     }
 
     fn resolve_linux_label(&self) -> Result<String, String> {
@@ -482,10 +489,11 @@ impl<'a> ResultMirror<'a> {
     }
 
     fn capture(&self, program: &str, args: &[&str]) -> Result<String, String> {
-        self.target
-            .is_local()
-            .then_some(Self::capture_local(program, args))
-            .unwrap_or_else(|| Self::capture_remote(self.target.host(), program, args))
+        if self.target.is_local() {
+            Self::capture_local(program, args)
+        } else {
+            Self::capture_remote(self.target.host(), program, args)
+        }
     }
 
     fn capture_local(program: &str, args: &[&str]) -> Result<String, String> {
@@ -572,10 +580,11 @@ impl<'a> ResultMirror<'a> {
         path: &Path,
         log_path: &Path,
     ) -> Result<(), String> {
-        self.target
-            .is_local()
-            .then_some(self.mirror_local_path(mirror_target, path, log_path))
-            .unwrap_or_else(|| self.mirror_remote_path(mirror_target, path, log_path))
+        if self.target.is_local() {
+            self.mirror_local_path(mirror_target, path, log_path)
+        } else {
+            self.mirror_remote_path(mirror_target, path, log_path)
+        }
     }
 
     fn mirror_local_path(
@@ -641,10 +650,11 @@ impl<'a> ResultMirror<'a> {
     }
 
     fn source_label(&self, path: &Path) -> String {
-        self.target
-            .is_local()
-            .then_some(self.source_path(path).display().to_string())
-            .unwrap_or_else(|| format!("{}:{}", self.target.host(), self.remote_source_path(path)))
+        if self.target.is_local() {
+            self.source_path(path).display().to_string()
+        } else {
+            format!("{}:{}", self.target.host(), self.remote_source_path(path))
+        }
     }
 
     fn local_manifest_path(&self) -> PathBuf {
@@ -774,10 +784,6 @@ impl LogAppendFile {
             .map_err(|err| format!("xrun: failed to spawn command '{program}': {err}"))
     }
 
-    fn write_line(&mut self, line: &str) -> Result<(), String> {
-        self.write_text(&format!("{line}\n"))
-    }
-
     fn write_text(&mut self, text: &str) -> Result<(), String> {
         self.file
             .write_all(text.as_bytes())
@@ -790,11 +796,13 @@ impl LogAppendFile {
     }
 }
 
+#[cfg(test)]
 pub struct JobResult {
     log_path: PathBuf,
     status: i32,
 }
 
+#[cfg(test)]
 impl JobResult {
     pub fn new(log_path: PathBuf, status: i32) -> Self {
         Self { log_path, status }

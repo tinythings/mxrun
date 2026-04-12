@@ -45,6 +45,7 @@ impl BuildTarget {
         &self.destination
     }
 
+    #[cfg(test)]
     pub fn mode(&self) -> &TargetMode {
         &self.mode
     }
@@ -88,9 +89,11 @@ impl BuildTarget {
     }
 
     pub fn title(&self) -> String {
-        self.is_local()
-            .then_some(format!("{} {} localhost", self.os(), self.arch()))
-            .unwrap_or_else(|| format!("{} {} {}", self.os(), self.arch(), self.destination()))
+        if self.is_local() {
+            format!("{} {} localhost", self.os(), self.arch())
+        } else {
+            format!("{} {} {}", self.os(), self.arch(), self.destination())
+        }
     }
 
     fn local_os() -> String {
@@ -128,6 +131,7 @@ impl ResultMirrorPlan {
         }
     }
 
+    #[cfg(test)]
     pub fn disabled(root: PathBuf, entry: &str) -> Self {
         Self::new(false, root, entry)
     }
@@ -185,21 +189,24 @@ struct Line<'a> {
 
 impl<'a> Line<'a> {
     fn meaningful((lineno, raw): (usize, &'a str)) -> Option<Self> {
-        raw.trim().is_empty().then_some(None).unwrap_or_else(|| {
-            raw.trim()
-                .starts_with('#')
-                .then_some(None)
-                .unwrap_or(Some(Self {
-                    lineno: lineno + 1,
-                    text: raw.trim(),
-                }))
-        })
+        let text = raw.trim();
+
+        if text.is_empty() || text.starts_with('#') {
+            None
+        } else {
+            Some(Self {
+                lineno: lineno + 1,
+                text,
+            })
+        }
     }
 
     fn parse(self) -> Result<BuildTarget, String> {
-        (self.text == "local")
-            .then_some(Ok(BuildTarget::local()))
-            .unwrap_or_else(|| self.remote_target())
+        if self.text == "local" {
+            Ok(BuildTarget::local())
+        } else {
+            self.remote_target()
+        }
     }
 
     fn remote_target(&self) -> Result<BuildTarget, String> {

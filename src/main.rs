@@ -2,6 +2,8 @@ mod ansi;
 #[cfg(test)]
 mod ansi_ut;
 mod app;
+#[cfg(test)]
+mod app_ut;
 mod clidef;
 mod model;
 #[cfg(test)]
@@ -200,11 +202,11 @@ impl ConfigFile {
     fn read_or_create(path: &PathBuf) -> Result<String, String> {
         fs::read_to_string(path)
             .or_else(|err| {
-                (err.kind() == std::io::ErrorKind::NotFound)
-                    .then_some(
-                        Self::create_default(path).map(|_| Self::default_contents().to_string()),
-                    )
-                    .unwrap_or_else(|| Err(err))
+                if err.kind() == std::io::ErrorKind::NotFound {
+                    Self::create_default(path).map(|_| Self::default_contents().to_string())
+                } else {
+                    Err(err)
+                }
             })
             .map_err(|err| err.to_string())
     }

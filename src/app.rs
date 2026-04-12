@@ -20,7 +20,9 @@ use crate::{
     ui::BuildScreen,
 };
 
-const MAX_LOG_BYTES_PER_REFRESH: usize = 16 * 1024;
+pub(crate) const LOG_READ_MAX: usize = 64 * 1024;
+pub(crate) const LOG_TICK_MAX: usize = 512 * 1024;
+const IDLE_MS: u64 = 16;
 
 pub struct XrunApp {
     plan: BuildPlan,
@@ -80,28 +82,37 @@ impl<'a> AppLoop<'a> {
 
     fn run(&mut self) -> Result<i32, String> {
         loop {
-            self.drain_events();
-            self.refresh_logs();
+            let busy = self.drain_events();
+            let busy = self.refresh_logs() || busy;
             self.refresh_popup();
             self.render()?;
 
-            if let Some(key) = self.key_pressed() {
-                if self.handle_key(key) {
-                    return Ok(self.exit_code_or_abort(key));
-                }
+            if let Some(key) = self.key_pressed()
+                && self.handle_key(key)
+            {
+                return Ok(self.exit_code_or_abort(key));
             }
-            thread::sleep(Duration::from_millis(16));
+            if !busy {
+                thread::sleep(Duration::from_millis(IDLE_MS));
+            }
         }
     }
 
-    fn drain_events(&mut self) {
+    fn drain_events(&mut self) -> bool {
+        let mut busy = false;
+
         while let Ok(event) = self.events.try_recv() {
             self.states[event.index].apply(event);
+            busy = true;
         }
+
+        busy
     }
 
-    fn refresh_logs(&mut self) {
-        self.states.iter_mut().for_each(JobState::refresh_log);
+    fn refresh_logs(&mut self) -> bool {
+        self.states
+            .iter_mut()
+            .fold(false, |busy, st| st.refresh_log() || busy)
     }
 
     fn render(&mut self) -> Result<(), String> {
@@ -138,9 +149,11 @@ impl<'a> AppLoop<'a> {
     }
 
     fn exit_code_or_abort(&self, key: KeyPress) -> i32 {
-        (!self.all_finished() && key.should_quit())
-            .then_some(130)
-            .unwrap_or_else(|| self.exit_code())
+        if !self.all_finished() && key.should_quit() {
+            130
+        } else {
+            self.exit_code()
+        }
     }
 
     fn key_pressed(&self) -> Option<KeyPress> {
@@ -379,12 +392,11 @@ impl InputReader {
         loop {
             let event = event::read();
 
-            if let Ok(evt) = event {
-                if let Some(key) = KeyPress::from_event(evt) {
-                    if tx.send(key).is_err() {
-                        return;
-                    }
-                }
+            if let Ok(evt) = event
+                && let Some(key) = KeyPress::from_event(evt)
+                && tx.send(key).is_err()
+            {
+                return;
             }
         }
     }
@@ -428,19 +440,21 @@ impl JobWorker {
                     .prepare()
                     .and_then(|_| self.job.run_build())
                     .and_then(|status| {
-                        (status == 0 && self.job.should_mirror_results())
-                            .then_some(
-                                self.tx
-                                    .send(JobEvent::mirroring(self.index))
-                                    .map_err(|err| err.to_string())
-                                    .map(|_| status),
-                            )
-                            .unwrap_or_else(|| Ok(status))
+                        if status == 0 && self.job.should_mirror_results() {
+                            self.tx
+                                .send(JobEvent::mirroring(self.index))
+                                .map_err(|err| err.to_string())
+                                .map(|_| status)
+                        } else {
+                            Ok(status)
+                        }
                     })
                     .and_then(|status| {
-                        (status == 0)
-                            .then_some(self.job.run_mirror().map(|_| status))
-                            .unwrap_or_else(|| Ok(status))
+                        if status == 0 {
+                            self.job.run_mirror().map(|_| status)
+                        } else {
+                            Ok(status)
+                        }
                     })
                     .map(|status| JobEvent::finished(self.index, status))
                     .unwrap_or_else(|err| JobEvent::failed(self.index, err)),
@@ -457,6 +471,7 @@ pub struct JobState {
     rendered_lines: Vec<ratatui::text::Line<'static>>,
     log_offset: u64,
     stage: JobStage,
+    done: Option<JobStage>,
     status_code: i32,
 }
 
@@ -469,40 +484,70 @@ impl JobState {
             rendered_lines: Vec::new(),
             log_offset: 0,
             stage: JobStage::Pending,
+            done: None,
             status_code: 0,
         }
     }
 
-    fn apply(&mut self, event: JobEvent) {
-        self.stage = event.stage;
+    pub(crate) fn apply(&mut self, event: JobEvent) {
         self.status_code = event.status_code;
         if let Some(message) = event.error {
             self.log_buffer.push_text(&format!("\n{message}\n"));
             self.rendered_lines = self.log_buffer.lines();
         }
+        if event.stage.is_finished() {
+            self.done = Some(event.stage);
+            self.finish_if_drained();
+            return;
+        }
+        self.done = None;
+        self.stage = event.stage;
     }
 
-    fn refresh_log(&mut self) {
-        self.log_path
-            .exists()
-            .then_some(self.read_new_log_bytes().ok())
-            .flatten()
-            .filter(|bytes| !bytes.is_empty())
-            .into_iter()
-            .for_each(|bytes| {
-                self.log_buffer
-                    .push_text(String::from_utf8_lossy(&bytes).as_ref());
-                self.rendered_lines = self.log_buffer.lines();
-            });
+    pub(crate) fn refresh_log(&mut self) -> bool {
+        if !self.log_path.exists() {
+            self.finish_if_drained();
+            return false;
+        }
+
+        let mut busy = false;
+        let mut total = 0;
+
+        while total < LOG_TICK_MAX {
+            let Some(bytes) = self
+                .read_new_log_bytes((LOG_TICK_MAX - total).min(LOG_READ_MAX))
+                .ok()
+                .filter(|bytes| !bytes.is_empty())
+            else {
+                break;
+            };
+
+            total += bytes.len();
+            self.log_buffer
+                .push_text(String::from_utf8_lossy(&bytes).as_ref());
+            busy = true;
+
+            if bytes.len() < LOG_READ_MAX {
+                break;
+            }
+        }
+
+        if busy {
+            self.rendered_lines = self.log_buffer.lines();
+        }
+
+        self.finish_if_drained();
+
+        busy
     }
 
-    fn read_new_log_bytes(&mut self) -> Result<Vec<u8>, String> {
+    fn read_new_log_bytes(&mut self, max: usize) -> Result<Vec<u8>, String> {
         File::open(&self.log_path)
             .map_err(|err| format!("xrun: failed to open log file: {err}"))
             .and_then(|mut file| {
                 file.seek(SeekFrom::Start(self.log_offset))
                     .map_err(|err| format!("xrun: failed to seek log file: {err}"))?;
-                let mut bytes = vec![0_u8; MAX_LOG_BYTES_PER_REFRESH];
+                let mut bytes = vec![0_u8; max];
                 let read_len = file
                     .read(&mut bytes)
                     .map_err(|err| format!("xrun: failed to read log file: {err}"))?;
@@ -540,6 +585,18 @@ impl JobState {
 
     pub fn status_code(&self) -> i32 {
         self.status_code
+    }
+
+    fn finish_if_drained(&mut self) {
+        if self.done.is_some() && self.log_drained() {
+            self.stage = self.done.take().unwrap_or(self.stage);
+        }
+    }
+
+    fn log_drained(&self) -> bool {
+        std::fs::metadata(&self.log_path)
+            .map(|meta| meta.len() <= self.log_offset)
+            .unwrap_or(true)
     }
 }
 
@@ -580,7 +637,7 @@ impl JobStage {
     }
 }
 
-struct JobEvent {
+pub(crate) struct JobEvent {
     index: usize,
     stage: JobStage,
     status_code: i32,
@@ -588,7 +645,7 @@ struct JobEvent {
 }
 
 impl JobEvent {
-    fn building(index: usize) -> Self {
+    pub(crate) fn building(index: usize) -> Self {
         Self {
             index,
             stage: JobStage::Building,
@@ -597,7 +654,7 @@ impl JobEvent {
         }
     }
 
-    fn mirroring(index: usize) -> Self {
+    pub(crate) fn mirroring(index: usize) -> Self {
         Self {
             index,
             stage: JobStage::Mirroring,
@@ -606,18 +663,20 @@ impl JobEvent {
         }
     }
 
-    fn finished(index: usize, status_code: i32) -> Self {
+    pub(crate) fn finished(index: usize, status_code: i32) -> Self {
         Self {
             index,
-            stage: (status_code == 0)
-                .then_some(JobStage::Success)
-                .unwrap_or(JobStage::Failed),
+            stage: if status_code == 0 {
+                JobStage::Success
+            } else {
+                JobStage::Failed
+            },
             status_code,
             error: None,
         }
     }
 
-    fn failed(index: usize, error: String) -> Self {
+    pub(crate) fn failed(index: usize, error: String) -> Self {
         Self {
             index,
             stage: JobStage::Failed,
@@ -651,127 +710,5 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
-    }
-}
-
-#[cfg(test)]
-mod app_ut {
-    use super::{BuildJob, JobEvent, JobState};
-    use crate::model::{BuildTarget, ResultMirrorPlan, XrunConfig};
-    use std::{fs, path::Path};
-
-    #[test]
-    fn job_state_rebuilds_rendered_lines_only_when_log_changes() {
-        let temp_root = std::env::temp_dir().join(format!(
-            "xrun-app-ut-{}-{}",
-            std::process::id(),
-            unique_suffix()
-        ));
-        let log_root = temp_root.join("logs");
-        let job = BuildJob::build(
-            &BuildTarget::local(),
-            "devel",
-            &temp_root,
-            &log_root,
-            "make",
-            &ResultMirrorPlan::disabled(temp_root.join("mirror"), "devel"),
-        );
-        let log_path = job.log_path().to_path_buf();
-        let mut state = JobState::from_job(&job);
-
-        fs::create_dir_all(log_root).expect("log dir should exist");
-        fs::write(&log_path, "first\n").expect("log should be written");
-        state.refresh_log();
-        assert_eq!(state.log_lines().len(), 2);
-        assert_eq!(state.log_lines()[0].spans[0].content, "first");
-
-        let first_snapshot = state.log_lines().to_vec();
-        state.refresh_log();
-        assert_eq!(state.log_lines(), first_snapshot.as_slice());
-
-        fs::write(&log_path, "first\nsecond\n").expect("log should be appended");
-        state.refresh_log();
-        assert_eq!(state.log_lines().len(), 3);
-        assert_eq!(state.log_lines()[1].spans[0].content, "second");
-
-        fs::remove_dir_all(&temp_root).ok();
-    }
-
-    #[test]
-    fn job_state_updates_rendered_lines_for_error_events() {
-        let temp_root = std::env::temp_dir().join(format!(
-            "xrun-app-ut-{}-{}",
-            std::process::id(),
-            unique_suffix()
-        ));
-        let plan = crate::runner::BuildPlan::new(
-            &XrunConfig::parse("local\n").expect("config should parse"),
-            "devel",
-            Path::new(&temp_root),
-            &temp_root.join("logs"),
-            "make",
-            ResultMirrorPlan::disabled(temp_root.join("mirror"), "devel"),
-        );
-        let mut state = JobState::from_job(&plan.jobs()[0]);
-
-        state.apply(JobEvent::failed(0, "boom".to_string()));
-
-        assert!(
-            state
-                .log_lines()
-                .iter()
-                .flat_map(|line| line.spans.iter())
-                .any(|span| span.content.contains("boom"))
-        );
-
-        fs::remove_dir_all(&temp_root).ok();
-    }
-
-    #[test]
-    fn job_state_reads_large_logs_in_chunks() {
-        let temp_root = std::env::temp_dir().join(format!(
-            "xrun-app-ut-{}-{}",
-            std::process::id(),
-            unique_suffix()
-        ));
-        let log_root = temp_root.join("logs");
-        let job = BuildJob::build(
-            &BuildTarget::local(),
-            "devel",
-            &temp_root,
-            &log_root,
-            "make",
-            &ResultMirrorPlan::disabled(temp_root.join("mirror"), "devel"),
-        );
-        let log_path = job.log_path().to_path_buf();
-        let mut state = JobState::from_job(&job);
-        let large_line = "x".repeat(super::MAX_LOG_BYTES_PER_REFRESH + 128);
-
-        fs::create_dir_all(&log_root).expect("log dir should exist");
-        fs::write(&log_path, &large_line).expect("log should be written");
-
-        state.refresh_log();
-        assert_eq!(state.log_offset, super::MAX_LOG_BYTES_PER_REFRESH as u64);
-        assert_eq!(
-            state.log_lines()[0].spans[0].content.len(),
-            super::MAX_LOG_BYTES_PER_REFRESH
-        );
-
-        state.refresh_log();
-        assert_eq!(state.log_offset, large_line.len() as u64);
-        assert_eq!(
-            state.log_lines()[0].spans[0].content.len(),
-            large_line.len()
-        );
-
-        fs::remove_dir_all(&temp_root).ok();
-    }
-
-    fn unique_suffix() -> String {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time should advance")
-            .as_nanos()
-            .to_string()
     }
 }

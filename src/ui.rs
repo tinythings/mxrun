@@ -267,9 +267,11 @@ impl<'a> TileViewport<'a> {
     }
 
     fn border_style(&self, active: bool) -> Style {
-        active
-            .then_some(Style::default().fg(Color::LightGreen))
-            .unwrap_or_default()
+        if active {
+            Style::default().fg(Color::LightGreen)
+        } else {
+            Style::default()
+        }
     }
 }
 

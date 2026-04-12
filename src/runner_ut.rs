@@ -5,20 +5,21 @@ use std::{
 };
 
 use crate::{
-    model::{BuildTarget, XrunConfig, ResultMirrorPlan},
+    model::{BuildTarget, ResultMirrorPlan, XrunConfig},
     runner::{BuildCommand, BuildJob, BuildPlan},
 };
 
 #[test]
 fn local_job_writes_full_log_file_from_pty() {
-    let log_path = TempDir::new("xrun-runner-ut")
-        .path()
-        .join("local.log");
+    let log_path = TempDir::new("xrun-runner-ut").path().join("local.log");
     let job = BuildJob::new(
         BuildTarget::local(),
         BuildCommand::new(
             "sh",
-            vec!["-lc".to_string(), "printf '\\033[1;31mRED\\033[0m\\n'".to_string()],
+            vec![
+                "-lc".to_string(),
+                "printf '\\033[1;31mRED\\033[0m\\n'".to_string(),
+            ],
             None,
         ),
         log_path.clone(),
@@ -31,7 +32,11 @@ fn local_job_writes_full_log_file_from_pty() {
     assert_eq!(result.status(), 0);
     assert_eq!(result.log_path(), Path::new(&log_path));
     assert!(job.target().is_local());
-    assert!(fs::read_to_string(&log_path).expect("log file should exist").contains("\u{1b}[1;31mRED"));
+    assert!(
+        fs::read_to_string(&log_path)
+            .expect("log file should exist")
+            .contains("\u{1b}[1;31mRED")
+    );
 }
 
 #[test]

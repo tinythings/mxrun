@@ -16,7 +16,12 @@ fn ansi_document_preserves_bright_red_text() {
 
     assert_eq!(lines[0].spans[0].content, "FAIL");
     assert_eq!(lines[0].spans[0].style.fg, Some(Color::LightRed));
-    assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::BOLD));
+    assert!(
+        lines[0].spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
 }
 
 #[test]

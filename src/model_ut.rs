@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::model::{XrunConfig, ResultMirrorPlan, TargetMode};
+use crate::model::{ResultMirrorPlan, TargetMode, XrunConfig};
 
 #[test]
 fn parse_accepts_local_pseudo_host() {
@@ -23,13 +23,17 @@ fn parse_accepts_remote_targets() {
     assert_eq!(cfg.targets()[0].mode(), &TargetMode::Remote);
     assert_eq!(cfg.targets()[0].os(), "FreeBSD");
     assert_eq!(cfg.targets()[0].arch(), "amd64");
-    assert_eq!(cfg.targets()[0].destination(), "192.168.122.122:work/sysinspect-xrun");
+    assert_eq!(
+        cfg.targets()[0].destination(),
+        "192.168.122.122:work/sysinspect-xrun"
+    );
 }
 
 #[test]
 fn parse_keeps_comments_and_blank_lines_ignored() {
-    let cfg = XrunConfig::parse("\n# comment\nlocal\n\nGNU/Linux x86_64 bo@jackass:work/sysinspect\n")
-        .expect("mixed config should parse");
+    let cfg =
+        XrunConfig::parse("\n# comment\nlocal\n\nGNU/Linux x86_64 bo@jackass:work/sysinspect\n")
+            .expect("mixed config should parse");
 
     assert_eq!(cfg.targets().len(), 2);
 }
@@ -61,9 +65,6 @@ fn result_mirror_plan_uses_standard_manifest_path() {
     let plan = ResultMirrorPlan::new(true, "/tmp/xrun".into(), "dev");
 
     assert!(plan.is_enabled());
-    assert_eq!(
-        plan.manifest(),
-        Path::new("build/.xrun/dev.paths")
-    );
+    assert_eq!(plan.manifest(), Path::new("build/.xrun/dev.paths"));
     assert_eq!(plan.root(), Path::new("/tmp/xrun"));
 }
