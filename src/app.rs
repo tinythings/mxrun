@@ -492,8 +492,10 @@ impl JobState {
     pub(crate) fn apply(&mut self, event: JobEvent) {
         self.status_code = event.status_code;
         if let Some(message) = event.error {
-            self.log_buffer.push_text(&format!("\n{message}\n"));
-            self.rendered_lines = self.log_buffer.lines();
+            let dirty = self.log_buffer.push_text(&format!("\n{message}\n"));
+            self.rendered_lines.truncate(dirty);
+            self.rendered_lines
+                .extend(self.log_buffer.lines_from(dirty));
         }
         if event.stage.is_finished() {
             self.done = Some(event.stage);
@@ -512,6 +514,7 @@ impl JobState {
 
         let mut busy = false;
         let mut total = 0;
+        let mut dirty = self.rendered_lines.len();
 
         while total < LOG_TICK_MAX {
             let Some(bytes) = self
@@ -523,8 +526,10 @@ impl JobState {
             };
 
             total += bytes.len();
-            self.log_buffer
-                .push_text(String::from_utf8_lossy(&bytes).as_ref());
+            dirty = dirty.min(
+                self.log_buffer
+                    .push_text(String::from_utf8_lossy(&bytes).as_ref()),
+            );
             busy = true;
 
             if bytes.len() < LOG_READ_MAX {
@@ -533,7 +538,9 @@ impl JobState {
         }
 
         if busy {
-            self.rendered_lines = self.log_buffer.lines();
+            self.rendered_lines.truncate(dirty);
+            self.rendered_lines
+                .extend(self.log_buffer.lines_from(dirty));
         }
 
         self.finish_if_drained();

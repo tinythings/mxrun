@@ -32,6 +32,7 @@ impl AnsiDocument {
 #[derive(Clone)]
 pub struct TerminalBuffer {
     lines: Vec<String>,
+    widths: Vec<usize>,
     row: usize,
     col: usize,
 }
@@ -40,6 +41,7 @@ impl TerminalBuffer {
     pub fn new() -> Self {
         Self {
             lines: vec![String::new()],
+            widths: vec![0],
             row: 0,
             col: 0,
         }
@@ -52,16 +54,19 @@ impl TerminalBuffer {
         buffer
     }
 
-    pub fn push_text(&mut self, text: &str) {
+    pub fn push_text(&mut self, text: &str) -> usize {
         let mut chars = text.chars();
+        let mut dirty = self.row.min(self.lines.len().saturating_sub(1));
 
         while let Some(ch) = chars.next() {
-            self.consume_char(ch, &mut chars);
+            self.consume_char(ch, &mut chars, &mut dirty);
         }
+
+        dirty
     }
 
-    pub fn lines(&self) -> Vec<Line<'static>> {
-        self.text_lines()
+    pub fn lines_from(&self, start: usize) -> Vec<Line<'static>> {
+        self.text_lines()[start..]
             .iter()
             .map(|line| AnsiLine::parse(line.as_str()).line())
             .collect()
@@ -71,43 +76,49 @@ impl TerminalBuffer {
         self.lines.clone()
     }
 
-    fn consume_char(&mut self, ch: char, chars: &mut std::str::Chars<'_>) {
+    fn consume_char(&mut self, ch: char, chars: &mut std::str::Chars<'_>, dirty: &mut usize) {
         match ch {
-            '\r' => self.col = 0,
-            '\n' => self.line_feed(),
-            '\u{1b}' => self.consume_escape(chars),
+            '\r' => {
+                *dirty = (*dirty).min(self.row);
+                self.col = 0;
+            }
+            '\n' => {
+                *dirty = (*dirty).min(self.row);
+                self.line_feed();
+            }
+            '\u{1b}' => self.consume_escape(chars, dirty),
             _ if ch.is_control() => {}
-            _ => self.write_char(ch),
+            _ => self.write_char(ch, dirty),
         }
     }
 
-    fn consume_escape(&mut self, chars: &mut std::str::Chars<'_>) {
+    fn consume_escape(&mut self, chars: &mut std::str::Chars<'_>, dirty: &mut usize) {
         if chars.next() == Some('[') {
-            self.consume_csi(chars);
+            self.consume_csi(chars, dirty);
         }
     }
 
-    fn consume_csi(&mut self, chars: &mut std::str::Chars<'_>) {
+    fn consume_csi(&mut self, chars: &mut std::str::Chars<'_>, dirty: &mut usize) {
         let mut payload = String::new();
 
         for ch in chars.by_ref() {
             if Self::is_csi_final(ch) {
-                self.apply_csi(&payload, ch);
+                self.apply_csi(&payload, ch, dirty);
                 return;
             }
             payload.push(ch);
         }
     }
 
-    fn apply_csi(&mut self, payload: &str, final_char: char) {
+    fn apply_csi(&mut self, payload: &str, final_char: char, dirty: &mut usize) {
         match final_char {
             'A' => self.move_up(Self::count(payload)),
             'B' => self.move_down(Self::count(payload)),
             'E' => self.next_line(Self::count(payload)),
             'F' => self.previous_line(Self::count(payload)),
             'G' => self.move_column(Self::count(payload)),
-            'K' => self.clear_line_from_cursor(),
-            'm' => self.write_sgr(payload),
+            'K' => self.clear_line_from_cursor(dirty),
+            'm' => self.write_sgr(payload, dirty),
             _ => {}
         }
     }
@@ -151,27 +162,40 @@ impl TerminalBuffer {
         self.ensure_row();
     }
 
-    fn clear_line_from_cursor(&mut self) {
+    fn clear_line_from_cursor(&mut self, dirty: &mut usize) {
         self.ensure_row();
+        *dirty = (*dirty).min(self.row);
         if self.col == 0 {
             self.lines[self.row].clear();
+            self.widths[self.row] = 0;
             return;
         }
         self.visible_byte_index(self.row, self.col)
             .into_iter()
-            .for_each(|index| self.lines[self.row].truncate(index));
+            .for_each(|index| {
+                self.lines[self.row].truncate(index);
+                self.widths[self.row] = self.col;
+            });
     }
 
-    fn write_sgr(&mut self, payload: &str) {
+    fn write_sgr(&mut self, payload: &str, dirty: &mut usize) {
         self.ensure_row();
+        *dirty = (*dirty).min(self.row);
         self.lines[self.row].push('\u{1b}');
         self.lines[self.row].push('[');
         self.lines[self.row].push_str(payload);
         self.lines[self.row].push('m');
     }
 
-    fn write_char(&mut self, ch: char) {
+    fn write_char(&mut self, ch: char, dirty: &mut usize) {
         self.ensure_row();
+        *dirty = (*dirty).min(self.row);
+        if self.col == self.widths[self.row] {
+            self.lines[self.row].push(ch);
+            self.widths[self.row] += 1;
+            self.col += 1;
+            return;
+        }
         self.ensure_col();
         self.replace_visible_char(self.row, self.col, ch);
         self.col += 1;
@@ -180,12 +204,14 @@ impl TerminalBuffer {
     fn ensure_row(&mut self) {
         while self.lines.len() <= self.row {
             self.lines.push(String::new());
+            self.widths.push(0);
         }
     }
 
     fn ensure_col(&mut self) {
-        while self.visible_len(self.row) <= self.col {
+        while self.widths[self.row] <= self.col {
             self.lines[self.row].push(' ');
+            self.widths[self.row] += 1;
         }
     }
 
@@ -196,7 +222,7 @@ impl TerminalBuffer {
     }
 
     fn visible_len(&self, row: usize) -> usize {
-        self.visible_ranges(row).len()
+        self.widths[row]
     }
 
     fn visible_byte_index(&self, row: usize, col: usize) -> Option<usize> {
