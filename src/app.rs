@@ -281,7 +281,7 @@ pub(crate) enum PopupState {
 }
 
 #[derive(Clone, Copy)]
-struct KeyPress {
+pub(crate) struct KeyPress {
     code: KeyCode,
     modifiers: KeyModifiers,
 }
@@ -294,7 +294,7 @@ impl KeyPress {
         }
     }
 
-    fn from_key(key: KeyEvent) -> Self {
+    pub(crate) fn from_key(key: KeyEvent) -> Self {
         Self {
             code: key.code,
             modifiers: key.modifiers,
@@ -313,8 +313,8 @@ impl KeyPress {
         self.is_ctrl_c() || self.is_abort_yes()
     }
 
-    fn should_quit_finished(&self) -> bool {
-        self.is_preserve_quit() || self.is_ctrl_c()
+    pub(crate) fn should_quit_finished(&self) -> bool {
+        self.is_preserve_quit() || self.is_ctrl_c() || self.is_any_quit_char()
     }
 
     fn should_cleanup_logs(&self) -> bool {
@@ -477,6 +477,17 @@ impl JobWorker {
     fn spawn(self) {
         thread::spawn(move || {
             let _ = self.tx.send(JobEvent::building(self.index));
+
+            if self.job.is_init() {
+                let _ = self.tx.send(
+                    self.job
+                        .prepare()
+                        .map(|_| JobEvent::finished(self.index, 0))
+                        .unwrap_or_else(|err| JobEvent::failed(self.index, err)),
+                );
+                return;
+            }
+
             let _ = self.tx.send(
                 self.job
                     .prepare()

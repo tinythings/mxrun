@@ -33,6 +33,16 @@ impl BuildPlan {
         }
     }
 
+    pub(crate) fn init(config: &MxrunConfig, root_dir: &Path) -> Self {
+        Self {
+            jobs: config
+                .targets()
+                .iter()
+                .map(|target| BuildJob::init_for(target, root_dir))
+                .collect(),
+        }
+    }
+
     pub fn jobs(&self) -> &[BuildJob] {
         &self.jobs
     }
@@ -44,6 +54,13 @@ pub struct BuildJob {
     log_path: PathBuf,
     root_dir: PathBuf,
     mirror_plan: ResultMirrorPlan,
+    mode: RunMode,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RunMode {
+    Run,
+    Init,
 }
 
 impl Clone for BuildJob {
@@ -54,6 +71,7 @@ impl Clone for BuildJob {
             log_path: self.log_path.clone(),
             root_dir: self.root_dir.clone(),
             mirror_plan: self.mirror_plan.clone(),
+            mode: self.mode,
         }
     }
 }
@@ -65,6 +83,7 @@ impl BuildJob {
         log_path: PathBuf,
         root_dir: PathBuf,
         mirror_plan: ResultMirrorPlan,
+        mode: RunMode,
     ) -> Self {
         Self {
             target,
@@ -72,6 +91,7 @@ impl BuildJob {
             log_path,
             root_dir,
             mirror_plan,
+            mode,
         }
     }
 
@@ -89,11 +109,31 @@ impl BuildJob {
             log_root.join(format!("{}.log", target.log_key())),
             root_dir.to_path_buf(),
             mirror_plan.clone(),
+            RunMode::Run,
         )
     }
 
     pub fn target(&self) -> &BuildTarget {
         &self.target
+    }
+
+    pub fn is_init(&self) -> bool {
+        matches!(self.mode, RunMode::Init)
+    }
+
+    pub(crate) fn init_for(target: &BuildTarget, root_dir: &Path) -> Self {
+        Self::new(
+            target.clone(),
+            BuildCommand::new("", vec![], None),
+            root_dir
+                .join(".mxrun")
+                .join("logs")
+                .join("init")
+                .join(format!("{}.log", target.log_key())),
+            root_dir.to_path_buf(),
+            ResultMirrorPlan::new(false, PathBuf::new(), ""),
+            RunMode::Init,
+        )
     }
 
     #[cfg(test)]

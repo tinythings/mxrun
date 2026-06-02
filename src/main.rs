@@ -75,11 +75,12 @@ impl Command {
     }
 
     fn init(&self) -> i32 {
-        eprintln!(
-            "mxrun: loaded {} target(s) for init; TUI runner is not implemented yet",
-            ConfigFile::load().targets().len()
-        );
-        2
+        MxrunApp::new(
+            BuildPlan::init(&ConfigFile::load(), &RepoRoot::path()),
+            false,
+        )
+        .run()
+        .unwrap_or_else(|err| Fatal::raise(&err))
     }
 
     fn run_entry(&self, options: &RunOptions) -> i32 {
