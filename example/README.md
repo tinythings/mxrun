@@ -1,29 +1,29 @@
-# xrun Example
+# mxrun Example
 
-This is a minimal producer project for xrun.
+This is a minimal producer project for mxrun.
 
 The project supplies:
 
 - a tiny hello world program in `hello.c`
-- a local-only target config in `xrun.conf`
-- a producer Makefile that builds an artifact and writes the manifest file xrun expects under `build/.xrun/`
+- a local-only target config in `mxrun.conf`
+- a producer Makefile that builds an artifact and writes the manifest file mxrun expects under `build/.mxrun/`
 
 ## Quick start
 
 From this directory:
 
 ```bash
-export XRUN_CONFIG=xrun.conf
+export MXRUN_CONFIG=mxrun.conf
 make devel
 ```
 
-If `XRUN_CONFIG` is exported, the example Makefile delegates `devel` and `release` through `xrun`. If `xrun` is not installed in your PATH, it falls back to `cargo run --manifest-path ../Cargo.toml -- run ...`. Without `XRUN_CONFIG`, the same targets run locally as plain Makefile entries.
+If `MXRUN_CONFIG` is exported, the example Makefile delegates `devel` and `release` through `mxrun`. If `mxrun` is not installed in your PATH, it falls back to `cargo run --manifest-path ../Cargo.toml -- run ...`. Without `MXRUN_CONFIG`, the same targets run locally as plain Makefile entries.
 
-To mirror results back through xrun, use:
+To mirror results back through mxrun, use:
 
 ```bash
-export XRUN_CONFIG=xrun.conf
-xrun run devel --mirror-results
+export MXRUN_CONFIG=mxrun.conf
+mxrun run devel --mirror-results
 ```
 
 The explicit Cargo form is still:
@@ -36,17 +36,17 @@ cargo run -- run devel --mirror-results
 The `devel` target builds `build/stage/hello` with verbose compiler output and writes:
 
 ```text
-build/.xrun/devel.paths
+build/.mxrun/devel.paths
 ```
 
 The `release` target builds `build/dist/hello` and writes:
 
 ```text
-build/.xrun/release.paths
+build/.mxrun/release.paths
 ```
 
-With result mirroring enabled, xrun copies the listed outputs back under:
+With result mirroring enabled, mxrun copies the listed outputs back under:
 
 ```text
-target/xrun/<OS-LABEL>/...
+target/mxrun/<OS-LABEL>/...
 ```

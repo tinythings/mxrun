@@ -1,6 +1,6 @@
 #include <stdio.h>
 
 int main(void) {
-    puts("hello from xrun");
+    puts("hello from mxrun");
     return 0;
 }

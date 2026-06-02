@@ -4,7 +4,7 @@ use clap::{Arg, ArgAction, ColorChoice, Command};
 use colored::Colorize;
 use std::path::PathBuf;
 
-pub static APPNAME: &str = "xrun";
+pub static APPNAME: &str = "mxrun";
 pub static VERSION: &str = "0.1.0";
 
 pub fn cli() -> Command {
@@ -19,12 +19,12 @@ pub fn cli() -> Command {
         .override_usage(format!("{APPNAME} [--add-host|-a <HOST>] [OPTIONS] <COMMAND>"))
         .subcommand(
             Command::new("init")
-                .about("Validate and initialise xrun targets from XRUN_CONFIG")
+                .about("Validate and initialise mxrun targets from MXRUN_CONFIG")
                 .styles(styles()),
         )
         .subcommand(
             Command::new("run")
-                .about("Run one xrun-aware make entry across configured targets")
+                .about("Run one mxrun-aware make entry across configured targets")
                 .styles(styles())
                 .arg(
                     Arg::new("entry")
@@ -36,13 +36,13 @@ pub fn cli() -> Command {
                     Arg::new("mirror-results")
                         .long("mirror-results")
                         .action(ArgAction::SetTrue)
-                        .help("After successful build, mirror known result roots back to the local xrun directory"),
+                        .help("After successful build, mirror known result roots back to the local mxrun directory"),
                 )
                 .arg(
                     Arg::new("mirror-root")
                         .long("mirror-root")
                         .value_name("DIR")
-                        .help("Override the local root directory used for mirrored results; default is ./target/xrun"),
+                        .help("Override the local root directory used for mirrored results; default is ./target/mxrun"),
                 )
                 .arg(
                     Arg::new("wrap-lines")
@@ -57,13 +57,13 @@ pub fn cli() -> Command {
                 .short('a')
                 .long("add-host")
                 .value_name("HOST")
-                .help("Add a remote host to the xrun config using the current user and current project path"),
+                .help("Add a remote host to the mxrun config using the current user and current project path"),
         )
         .arg(
             Arg::new("config")
                 .short('c')
                 .long("config")
-                .help("Specify an alternative xrun config instead of XRUN_CONFIG"),
+                .help("Specify an alternative mxrun config instead of MXRUN_CONFIG"),
         )
         .arg(
             Arg::new("debug")

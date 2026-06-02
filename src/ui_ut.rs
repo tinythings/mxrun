@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::{
     app::JobStage,
-    model::{ResultMirrorPlan, XrunConfig},
+    model::{ResultMirrorPlan, MxrunConfig},
     runner::BuildPlan,
     ui::{BuildScreen, GridShape, TileLayout, TileStatus, TileViewport},
 };
@@ -50,7 +50,7 @@ fn build_screen_creates_one_tile_per_job() {
         screen.tiles()[1]
             .status()
             .title()
-            .contains("192.168.122.122:work/sysinspect-xrun")
+            .contains("192.168.122.122:work/sysinspect-mxrun")
     );
 }
 
@@ -230,14 +230,14 @@ fn tile_viewport_page_up_moves_above_tail() {
 }
 
 struct Fixture {
-    config: XrunConfig,
+    config: MxrunConfig,
 }
 
 impl Fixture {
     fn new() -> Self {
         Self {
-            config: XrunConfig::parse(
-                "local\nFreeBSD amd64 192.168.122.122:work/sysinspect-xrun\n",
+            config: MxrunConfig::parse(
+                "local\nFreeBSD amd64 192.168.122.122:work/sysinspect-mxrun\n",
             )
             .expect("config should parse"),
         }
@@ -250,7 +250,7 @@ impl Fixture {
             std::path::Path::new("/tmp/sysinspect"),
             std::path::Path::new("/tmp/logs"),
             "make",
-            ResultMirrorPlan::disabled(std::path::PathBuf::from("/tmp/xrun"), "dev"),
+            ResultMirrorPlan::disabled(std::path::PathBuf::from("/tmp/mxrun"), "dev"),
         )
     }
 }

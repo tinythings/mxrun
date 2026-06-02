@@ -5,13 +5,13 @@ use std::{
 };
 
 use crate::{
-    model::{BuildTarget, ResultMirrorPlan, XrunConfig},
+    model::{BuildTarget, ResultMirrorPlan, MxrunConfig},
     runner::{BuildCommand, BuildJob, BuildPlan},
 };
 
 #[test]
 fn local_job_writes_full_log_file_from_pty() {
-    let log_path = TempDir::new("xrun-runner-ut").path().join("local.log");
+    let log_path = TempDir::new("mxrun-runner-ut").path().join("local.log");
     let job = BuildJob::new(
         BuildTarget::local(),
         BuildCommand::new(
@@ -24,7 +24,7 @@ fn local_job_writes_full_log_file_from_pty() {
         ),
         log_path.clone(),
         PathBuf::from("/tmp/sysinspect"),
-        ResultMirrorPlan::disabled(PathBuf::from("/tmp/xrun"), "dev"),
+        ResultMirrorPlan::disabled(PathBuf::from("/tmp/mxrun"), "dev"),
     );
     let result = job.run().expect("local PTY job should run");
 
@@ -42,38 +42,38 @@ fn local_job_writes_full_log_file_from_pty() {
 #[test]
 fn remote_job_uses_ssh_tty_and_remote_make_command() {
     let job = BuildJob::build(
-        &BuildTarget::remote("FreeBSD", "amd64", "192.168.122.122:work/sysinspect-xrun"),
+        &BuildTarget::remote("FreeBSD", "amd64", "192.168.122.122:work/sysinspect-mxrun"),
         "dev",
         Path::new("/tmp/sysinspect"),
         Path::new("/tmp/logs"),
         "make",
-        &ResultMirrorPlan::disabled(PathBuf::from("/tmp/xrun"), "dev"),
+        &ResultMirrorPlan::disabled(PathBuf::from("/tmp/mxrun"), "dev"),
     );
     let command = job.command().args();
 
     assert_eq!(command[0], "-tt");
     assert_eq!(command[1], "192.168.122.122");
-    assert_eq!(command[2], "cd 'work/sysinspect-xrun' && gmake dev");
+    assert_eq!(command[2], "cd 'work/sysinspect-mxrun' && gmake dev");
 }
 
 #[test]
 fn build_plan_creates_one_job_per_target_with_stable_log_paths() {
-    let temp = TempDir::new("xrun-plan-ut");
+    let temp = TempDir::new("mxrun-plan-ut");
     let plan = BuildPlan::new(
-        &XrunConfig::parse("local\nFreeBSD amd64 192.168.122.122:work/sysinspect-xrun\n")
+        &MxrunConfig::parse("local\nFreeBSD amd64 192.168.122.122:work/sysinspect-mxrun\n")
             .expect("config should parse"),
         "modules-dev",
         Path::new("/tmp/sysinspect"),
         temp.path(),
         "make",
-        ResultMirrorPlan::disabled(PathBuf::from("/tmp/xrun"), "modules-dev"),
+        ResultMirrorPlan::disabled(PathBuf::from("/tmp/mxrun"), "modules-dev"),
     );
 
     assert_eq!(plan.jobs().len(), 2);
     assert_eq!(plan.jobs()[0].log_path(), temp.path().join("local.log"));
     assert_eq!(
         plan.jobs()[1].log_path(),
-        temp.path().join("192.168.122.122_work_sysinspect-xrun.log")
+        temp.path().join("192.168.122.122_work_sysinspect-mxrun.log")
     );
 }
 

@@ -150,17 +150,17 @@ impl ResultMirrorPlan {
 
     fn manifest_for_entry(entry: &str) -> PathBuf {
         PathBuf::from("build")
-            .join(".xrun")
+            .join(".mxrun")
             .join(format!("{entry}.paths"))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct XrunConfig {
+pub struct MxrunConfig {
     targets: Vec<BuildTarget>,
 }
 
-impl XrunConfig {
+impl MxrunConfig {
     pub fn parse(src: &str) -> Result<Self, String> {
         Self::from_lines(
             src.lines()
@@ -178,7 +178,7 @@ impl XrunConfig {
     fn from_lines(targets: Vec<BuildTarget>) -> Result<Self, String> {
         (!targets.is_empty())
             .then_some(Self { targets })
-            .ok_or_else(|| "xrun config has no targets".to_string())
+            .ok_or_else(|| "mxrun config has no targets".to_string())
     }
 }
 
@@ -216,7 +216,7 @@ impl<'a> Line<'a> {
                 .then_some(BuildTarget::remote(fields[0], fields[1], fields[2]))
                 .ok_or_else(|| {
                     format!(
-                        "invalid xrun line {}: missing host:/destination in third field",
+                        "invalid mxrun line {}: missing host:/destination in third field",
                         self.lineno
                     )
                 })
@@ -232,7 +232,7 @@ impl<'a> Line<'a> {
                     .then_some(fields.clone())
                     .ok_or_else(|| {
                         format!(
-                            "invalid xrun line {}: expected 3 fields, got {}",
+                            "invalid mxrun line {}: expected 3 fields, got {}",
                             self.lineno,
                             fields.len()
                         )

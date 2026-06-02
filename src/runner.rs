@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use crate::model::{BuildTarget, ResultMirrorPlan, XrunConfig};
+use crate::model::{BuildTarget, ResultMirrorPlan, MxrunConfig};
 use portable_pty::{CommandBuilder, PtySize, PtySystem, native_pty_system};
 
 pub struct BuildPlan {
@@ -15,7 +15,7 @@ pub struct BuildPlan {
 
 impl BuildPlan {
     pub fn new(
-        config: &XrunConfig,
+        config: &MxrunConfig,
         entry: &str,
         root_dir: &Path,
         log_root: &Path,
@@ -108,7 +108,7 @@ impl BuildJob {
     #[cfg(test)]
     pub fn run(&self) -> Result<JobResult, String> {
         fs::create_dir_all(self.log_path.parent().unwrap_or_else(|| Path::new(".")))
-            .map_err(|err| format!("xrun: failed to create log directory: {err}"))?;
+            .map_err(|err| format!("mxrun: failed to create log directory: {err}"))?;
         self.reset_log_file()?;
         self.prepare().and_then(|_| {
             self.run_build().and_then(|status| {
@@ -129,13 +129,13 @@ impl BuildJob {
             .write(true)
             .truncate(true)
             .open(&self.log_path)
-            .map_err(|err| format!("xrun: failed to reset log file: {err}"))
+            .map_err(|err| format!("mxrun: failed to reset log file: {err}"))
             .map(|_| ())
     }
 
     pub(crate) fn prepare(&self) -> Result<(), String> {
         fs::create_dir_all(self.log_path.parent().unwrap_or_else(|| Path::new(".")))
-            .map_err(|err| format!("xrun: failed to create log directory: {err}"))?;
+            .map_err(|err| format!("mxrun: failed to create log directory: {err}"))?;
         if self.target.is_local() {
             Ok(())
         } else {
@@ -219,7 +219,7 @@ impl BuildCommand {
             "sh",
             vec![
                 "-lc".to_string(),
-                format!("XRUN_CONFIG= XRUN_LOCAL_MAKE= {} {}", local_make, entry),
+                format!("MXRUN_CONFIG= MXRUN_LOCAL_MAKE= {} {}", local_make, entry),
             ],
             Some(root_dir.to_path_buf()),
         )
@@ -290,7 +290,7 @@ impl<'a> RemoteSync<'a> {
             "--exclude".to_string(),
             ".idea".to_string(),
             "--exclude".to_string(),
-            ".xrun".to_string(),
+            ".mxrun".to_string(),
             "--exclude".to_string(),
             "target".to_string(),
             "--exclude".to_string(),
@@ -309,7 +309,7 @@ impl<'a> RemoteSync<'a> {
     fn ensure_success(status: i32) -> Result<(), String> {
         (status == 0)
             .then_some(())
-            .ok_or_else(|| "xrun: remote sync failed".to_string())
+            .ok_or_else(|| "mxrun: remote sync failed".to_string())
     }
 }
 
@@ -368,14 +368,14 @@ impl<'a> ResultMirror<'a> {
 
     fn local_manifest_entries(&self) -> Result<Vec<PathBuf>, String> {
         fs::read_to_string(self.local_manifest_path())
-            .map_err(|err| format!("xrun: failed to read mirror manifest: {err}"))
+            .map_err(|err| format!("mxrun: failed to read mirror manifest: {err}"))
             .map(|text| Self::parse_manifest_entries(&text))
     }
 
     fn remote_manifest_entries(&self) -> Result<Vec<PathBuf>, String> {
         let temp_manifest = self
             .root_dir
-            .join(".xrun")
+            .join(".mxrun")
             .join("manifest-cache")
             .join(format!("{}.paths", self.target.log_key()));
 
@@ -385,7 +385,7 @@ impl<'a> ResultMirror<'a> {
             .into_iter()
             .try_for_each(|dir| {
                 fs::create_dir_all(dir).map_err(|err| {
-                    format!("xrun: failed to create manifest cache directory: {err}")
+                    format!("mxrun: failed to create manifest cache directory: {err}")
                 })
             })
             .and_then(|_| {
@@ -397,16 +397,16 @@ impl<'a> ResultMirror<'a> {
                         temp_manifest.display().to_string(),
                     ],
                 )
-                .status(&self.root_dir.join(".xrun").join("manifest-fetch.log"))
+                .status(&self.root_dir.join(".mxrun").join("manifest-fetch.log"))
                 .and_then(|status| {
                     (status == 0)
                         .then_some(())
-                        .ok_or_else(|| "xrun: failed to fetch remote mirror manifest".to_string())
+                        .ok_or_else(|| "mxrun: failed to fetch remote mirror manifest".to_string())
                 })
             })
             .and_then(|_| {
                 fs::read_to_string(&temp_manifest).map_err(|err| {
-                    format!("xrun: failed to read fetched remote mirror manifest: {err}")
+                    format!("mxrun: failed to read fetched remote mirror manifest: {err}")
                 })
             })
             .map(|text| Self::parse_manifest_entries(&text))
@@ -476,7 +476,7 @@ impl<'a> ResultMirror<'a> {
                 value
                     .strip_prefix("glibc ")
                     .map(|version| format!("glibc {version}"))
-                    .ok_or_else(|| "xrun: could not parse glibc version".to_string())
+                    .ok_or_else(|| "mxrun: could not parse glibc version".to_string())
             })
     }
 
@@ -484,7 +484,7 @@ impl<'a> ResultMirror<'a> {
         self.capture("ldd", &["--version"]).and_then(|value| {
             Self::first_version(&value)
                 .map(|version| format!("musl {version}"))
-                .ok_or_else(|| "xrun: could not parse musl version".to_string())
+                .ok_or_else(|| "mxrun: could not parse musl version".to_string())
         })
     }
 
@@ -500,7 +500,7 @@ impl<'a> ResultMirror<'a> {
         Command::new(program)
             .args(args)
             .output()
-            .map_err(|err| format!("xrun: failed to run '{program}': {err}"))
+            .map_err(|err| format!("mxrun: failed to run '{program}': {err}"))
             .and_then(|output| Self::capture_output(program, output))
     }
 
@@ -510,7 +510,7 @@ impl<'a> ResultMirror<'a> {
             .arg(program)
             .args(args)
             .output()
-            .map_err(|err| format!("xrun: failed to query {host}: {err}"))
+            .map_err(|err| format!("mxrun: failed to query {host}: {err}"))
             .and_then(|output| Self::capture_output(program, output))
     }
 
@@ -522,7 +522,7 @@ impl<'a> ResultMirror<'a> {
             .filter(|text| !text.is_empty())
             .ok_or_else(|| {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                format!("xrun: failed to query '{program}': {stderr}")
+                format!("mxrun: failed to query '{program}': {stderr}")
             })
     }
 
@@ -571,7 +571,7 @@ impl<'a> ResultMirror<'a> {
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| mirror_target.root().to_path_buf()),
         )
-        .map_err(|err| format!("xrun: failed to create mirror directory: {err}"))
+        .map_err(|err| format!("mxrun: failed to create mirror directory: {err}"))
     }
 
     fn mirror_path(
@@ -684,7 +684,7 @@ impl<'a> ResultMirror<'a> {
     fn ensure_success(status: i32) -> Result<(), String> {
         (status == 0)
             .then_some(())
-            .ok_or_else(|| "xrun: result mirroring failed".to_string())
+            .ok_or_else(|| "mxrun: result mirroring failed".to_string())
     }
 }
 
@@ -745,7 +745,7 @@ impl LoggedCommand {
                 .and_then(|mut child| {
                     child
                         .wait()
-                        .map_err(|err| format!("xrun: failed to wait for command: {err}"))
+                        .map_err(|err| format!("mxrun: failed to wait for command: {err}"))
                 })
                 .map(|status| status.code().unwrap_or(1))
         })
@@ -762,7 +762,7 @@ impl LogAppendFile {
             .create(true)
             .append(true)
             .open(log_path)
-            .map_err(|err| format!("xrun: failed to open log file for append: {err}"))
+            .map_err(|err| format!("mxrun: failed to open log file for append: {err}"))
             .map(|file| Self { file })
     }
 
@@ -770,28 +770,28 @@ impl LogAppendFile {
         let stdout = self
             .file
             .try_clone()
-            .map_err(|err| format!("xrun: failed to clone log file handle: {err}"))?;
+            .map_err(|err| format!("mxrun: failed to clone log file handle: {err}"))?;
         let stderr = self
             .file
             .try_clone()
-            .map_err(|err| format!("xrun: failed to clone log file handle: {err}"))?;
+            .map_err(|err| format!("mxrun: failed to clone log file handle: {err}"))?;
 
         Command::new(program)
             .args(args)
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr))
             .spawn()
-            .map_err(|err| format!("xrun: failed to spawn command '{program}': {err}"))
+            .map_err(|err| format!("mxrun: failed to spawn command '{program}': {err}"))
     }
 
     fn write_text(&mut self, text: &str) -> Result<(), String> {
         self.file
             .write_all(text.as_bytes())
-            .map_err(|err| format!("xrun: failed to append log file: {err}"))
+            .map_err(|err| format!("mxrun: failed to append log file: {err}"))
             .and_then(|_| {
                 self.file
                     .flush()
-                    .map_err(|err| format!("xrun: failed to flush log file: {err}"))
+                    .map_err(|err| format!("mxrun: failed to flush log file: {err}"))
             })
     }
 }
@@ -833,7 +833,7 @@ impl<'a> PtySession<'a> {
     fn run(&self, log_path: &Path) -> Result<i32, String> {
         self.pty_system()
             .openpty(self.size())
-            .map_err(|err| format!("xrun: failed to open PTY: {err}"))
+            .map_err(|err| format!("mxrun: failed to open PTY: {err}"))
             .and_then(|pty| self.spawn(pty, log_path))
     }
 
@@ -853,17 +853,17 @@ impl<'a> PtySession<'a> {
     fn spawn(&self, pty: portable_pty::PtyPair, log_path: &Path) -> Result<i32, String> {
         pty.slave
             .spawn_command(self.command_builder())
-            .map_err(|err| format!("xrun: failed to spawn PTY child: {err}"))
+            .map_err(|err| format!("mxrun: failed to spawn PTY child: {err}"))
             .and_then(|mut child| {
                 drop(pty.slave);
                 pty.master
                     .try_clone_reader()
-                    .map_err(|err| format!("xrun: failed to clone PTY reader: {err}"))
+                    .map_err(|err| format!("mxrun: failed to clone PTY reader: {err}"))
                     .and_then(|reader| {
                         Self::capture(reader, log_path).and_then(|capture| {
                             child
                                 .wait()
-                                .map_err(|err| format!("xrun: failed to wait for PTY child: {err}"))
+                                .map_err(|err| format!("mxrun: failed to wait for PTY child: {err}"))
                                 .map(|status| (capture, status))
                         })
                     })
@@ -892,7 +892,7 @@ impl<'a> PtySession<'a> {
 
     fn capture(reader: Box<dyn Read + Send>, log_path: &Path) -> Result<LogCapture, String> {
         File::create(log_path)
-            .map_err(|err| format!("xrun: failed to create log file: {err}"))
+            .map_err(|err| format!("mxrun: failed to create log file: {err}"))
             .map(|file| LogCapture::new(reader, file))
     }
 }
@@ -909,14 +909,14 @@ impl LogCapture {
                 loop {
                     match reader
                         .read(&mut buffer)
-                        .map_err(|err| format!("xrun: failed to read PTY stream: {err}"))?
+                        .map_err(|err| format!("mxrun: failed to read PTY stream: {err}"))?
                     {
                         0 => return Ok(()),
                         read_len => {
                             file.write_all(&buffer[..read_len])
-                                .map_err(|err| format!("xrun: failed to write log file: {err}"))?;
+                                .map_err(|err| format!("mxrun: failed to write log file: {err}"))?;
                             file.flush()
-                                .map_err(|err| format!("xrun: failed to flush log file: {err}"))?;
+                                .map_err(|err| format!("mxrun: failed to flush log file: {err}"))?;
                         }
                     }
                 }
@@ -927,6 +927,6 @@ impl LogCapture {
     fn join(self) -> Result<(), String> {
         self.thread
             .join()
-            .map_err(|_| "xrun: PTY log capture thread panicked".to_string())?
+            .map_err(|_| "mxrun: PTY log capture thread panicked".to_string())?
     }
 }

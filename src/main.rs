@@ -21,8 +21,8 @@ use std::{env, fs, process};
 
 use clap::ArgMatches;
 
-use app::XrunApp;
-use model::{ResultMirrorPlan, XrunConfig};
+use app::MxrunApp;
+use model::{ResultMirrorPlan, MxrunConfig};
 use runner::BuildPlan;
 
 struct App;
@@ -76,7 +76,7 @@ impl Command {
 
     fn init(&self) -> i32 {
         eprintln!(
-            "xrun: loaded {} target(s) for init; TUI runner is not implemented yet",
+            "mxrun: loaded {} target(s) for init; TUI runner is not implemented yet",
             ConfigFile::load().targets().len()
         );
         2
@@ -84,7 +84,7 @@ impl Command {
 
     fn run_entry(&self, options: &RunOptions) -> i32 {
         options.announce_mirroring_contract();
-        XrunApp::new(
+        MxrunApp::new(
             BuildPlan::new(
                 &ConfigFile::load(),
                 options.entry(),
@@ -100,7 +100,7 @@ impl Command {
     }
 
     fn usage() -> ! {
-        Fatal::raise("Usage: xrun [--add-host|-a <host>] init | run <entry>")
+        Fatal::raise("Usage: mxrun [--add-host|-a <host>] init | run <entry>")
     }
 }
 
@@ -108,7 +108,7 @@ impl AddHostOptions {
     fn run(&self) -> i32 {
         self.add_host()
             .map(|line| {
-                eprintln!("xrun: added host target: {line}");
+                eprintln!("mxrun: added host target: {line}");
                 0
             })
             .unwrap_or_else(|err| Fatal::raise(&err))
@@ -137,7 +137,7 @@ impl RunOptions {
         let mirror_results = clidef::mirror_results(am);
         let mirror_root = clidef::mirror_root(am);
         if mirror_root.is_some() && !mirror_results {
-            Fatal::raise("xrun: --mirror-root requires --mirror-results");
+            Fatal::raise("mxrun: --mirror-root requires --mirror-results");
         }
         Self {
             entry: clidef::entry(am),
@@ -148,7 +148,7 @@ impl RunOptions {
     }
 
     fn default_mirror_root() -> PathBuf {
-        RepoRoot::path().join("target").join("xrun")
+        RepoRoot::path().join("target").join("mxrun")
     }
 
     fn entry(&self) -> &str {
@@ -170,7 +170,7 @@ impl RunOptions {
     fn announce_mirroring_contract(&self) {
         if self.mirror_results() {
             eprintln!(
-                "xrun: result mirroring requested; local mirror root is {}",
+                "mxrun: result mirroring requested; local mirror root is {}",
                 self.mirror_root().display()
             );
         }
@@ -195,17 +195,17 @@ impl ConfigFile {
             .windows(2)
             .find(|args| args[0] == "-c" || args[0] == "--config")
             .map(|args| args[1].clone())
-            .or_else(|| env::var("XRUN_CONFIG").ok())
-            .unwrap_or_else(|| Fatal::raise("XRUN_CONFIG is not set"))
+            .or_else(|| env::var("MXRUN_CONFIG").ok())
+            .unwrap_or_else(|| Fatal::raise("MXRUN_CONFIG is not set"))
     }
 
     fn read() -> String {
         Self::read_or_create(&PathBuf::from(Self::path()))
-            .unwrap_or_else(|err| Fatal::raise(&format!("xrun: failed to read config: {err}")))
+            .unwrap_or_else(|err| Fatal::raise(&format!("mxrun: failed to read config: {err}")))
     }
 
-    fn load() -> XrunConfig {
-        XrunConfig::parse(&Self::read()).unwrap_or_else(|err| Fatal::raise(&format!("xrun: {err}")))
+    fn load() -> MxrunConfig {
+        MxrunConfig::parse(&Self::read()).unwrap_or_else(|err| Fatal::raise(&format!("mxrun: {err}")))
     }
 
     fn read_or_create(path: &PathBuf) -> Result<String, String> {
@@ -253,7 +253,7 @@ struct RepoRoot;
 impl RepoRoot {
     fn path() -> std::path::PathBuf {
         std::env::current_dir().unwrap_or_else(|err| {
-            Fatal::raise(&format!("xrun: failed to detect current directory: {err}"))
+            Fatal::raise(&format!("mxrun: failed to detect current directory: {err}"))
         })
     }
 }
@@ -262,7 +262,7 @@ struct LogRoot;
 
 impl LogRoot {
     fn path(entry: &str) -> std::path::PathBuf {
-        RepoRoot::path().join(".xrun").join("logs").join(entry)
+        RepoRoot::path().join(".mxrun").join("logs").join(entry)
     }
 }
 
@@ -270,7 +270,7 @@ struct LocalMake;
 
 impl LocalMake {
     fn name() -> String {
-        env::var("XRUN_LOCAL_MAKE").unwrap_or_else(|_| "make".to_string())
+        env::var("MXRUN_LOCAL_MAKE").unwrap_or_else(|_| "make".to_string())
     }
 }
 
@@ -282,21 +282,21 @@ impl LocalUser {
             .ok()
             .filter(|value| !value.trim().is_empty())
             .or_else(|| Self::capture_id_user().ok())
-            .ok_or_else(|| "xrun: failed to detect local user name".to_string())
+            .ok_or_else(|| "mxrun: failed to detect local user name".to_string())
     }
 
     fn capture_id_user() -> Result<String, String> {
         ProcessCommand::new("id")
             .arg("-un")
             .output()
-            .map_err(|err| format!("xrun: failed to run 'id -un': {err}"))
+            .map_err(|err| format!("mxrun: failed to run 'id -un': {err}"))
             .and_then(|output| {
                 output
                     .status
                     .success()
                     .then_some(String::from_utf8_lossy(&output.stdout).trim().to_string())
                     .filter(|value| !value.is_empty())
-                    .ok_or_else(|| "xrun: failed to detect local user name".to_string())
+                    .ok_or_else(|| "mxrun: failed to detect local user name".to_string())
             })
     }
 }
@@ -311,11 +311,11 @@ impl SshCopyId {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .status()
-            .map_err(|err| format!("xrun: failed to run ssh-copy-id: {err}"))
+            .map_err(|err| format!("mxrun: failed to run ssh-copy-id: {err}"))
             .and_then(|status| {
                 status.success().then_some(()).ok_or_else(|| {
                     format!(
-                        "xrun: ssh-copy-id failed with status {}",
+                        "mxrun: ssh-copy-id failed with status {}",
                         status.code().unwrap_or(1)
                     )
                 })
@@ -331,7 +331,7 @@ impl RemoteProbe {
             .arg(remote)
             .args(command)
             .output()
-            .map_err(|err| format!("xrun: failed to query {remote}: {err}"))
+            .map_err(|err| format!("mxrun: failed to query {remote}: {err}"))
             .and_then(|output| {
                 output
                     .status
@@ -340,7 +340,7 @@ impl RemoteProbe {
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| {
                         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                        format!("xrun: failed to query {remote}: {stderr}")
+                        format!("mxrun: failed to query {remote}: {stderr}")
                     })
             })
     }
@@ -378,8 +378,8 @@ mod main_ut {
 
     #[test]
     fn read_or_create_bootstraps_missing_config_with_local_target() {
-        let temp = TempDir::new("xrun-main-ut");
-        let path = temp.path().join("nested").join("xrun.conf");
+        let temp = TempDir::new("mxrun-main-ut");
+        let path = temp.path().join("nested").join("mxrun.conf");
 
         let text = ConfigFile::read_or_create(&path).expect("missing config should be created");
 
@@ -392,8 +392,8 @@ mod main_ut {
 
     #[test]
     fn read_or_create_keeps_existing_config_contents() {
-        let temp = TempDir::new("xrun-main-ut");
-        let path = temp.path().join("xrun.conf");
+        let temp = TempDir::new("mxrun-main-ut");
+        let path = temp.path().join("mxrun.conf");
         fs::write(&path, "local\nFreeBSD amd64 host:work/tree\n")
             .expect("fixture config should be written");
 
@@ -404,17 +404,17 @@ mod main_ut {
 
     #[test]
     fn append_target_line_adds_new_remote_entry_once() {
-        let temp = TempDir::new("xrun-main-ut");
-        let path = temp.path().join("xrun.conf");
+        let temp = TempDir::new("mxrun-main-ut");
+        let path = temp.path().join("mxrun.conf");
         fs::write(&path, "local\n").expect("fixture config should be written");
 
-        let line = "GNU/Linux x86_64 bo@example:/home/bo/work/xrun";
+        let line = "GNU/Linux x86_64 bo@example:/home/bo/work/mxrun";
         ConfigFile::append_target_line_at(&path, line).expect("remote target should be appended");
         ConfigFile::append_target_line_at(&path, line).expect("duplicate append should be ignored");
 
         assert_eq!(
             fs::read_to_string(&path).expect("config should be readable"),
-            "local\nGNU/Linux x86_64 bo@example:/home/bo/work/xrun\n"
+            "local\nGNU/Linux x86_64 bo@example:/home/bo/work/mxrun\n"
         );
     }
 
@@ -424,10 +424,10 @@ mod main_ut {
             "GNU/Linux",
             "x86_64",
             "bo@example",
-            Path::new("/home/bo/work/xrun"),
+            Path::new("/home/bo/work/mxrun"),
         );
 
-        assert_eq!(line, "GNU/Linux x86_64 bo@example:/home/bo/work/xrun");
+        assert_eq!(line, "GNU/Linux x86_64 bo@example:/home/bo/work/mxrun");
     }
 
     struct TempDir {

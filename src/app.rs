@@ -24,13 +24,13 @@ pub(crate) const LOG_READ_MAX: usize = 64 * 1024;
 pub(crate) const LOG_TICK_MAX: usize = 512 * 1024;
 const IDLE_MS: u64 = 16;
 
-pub struct XrunApp {
+pub struct MxrunApp {
     plan: BuildPlan,
     states: Vec<JobState>,
     wrap_lines: bool,
 }
 
-impl XrunApp {
+impl MxrunApp {
     pub fn new(plan: BuildPlan, wrap_lines: bool) -> Self {
         Self {
             states: plan.jobs().iter().map(JobState::from_job).collect(),
@@ -139,7 +139,7 @@ impl<'a> AppLoop<'a> {
                 )
                 .render(frame)
             })
-            .map_err(|err| format!("xrun: failed to render TUI: {err}"))
+            .map_err(|err| format!("mxrun: failed to render TUI: {err}"))
             .map(|_| ())
     }
 
@@ -261,11 +261,11 @@ impl<'a> AppLoop<'a> {
         key.should_cleanup_logs()
             .then_some(())
             .into_iter()
-            .for_each(|_| self.remove_xrun_root());
+            .for_each(|_| self.remove_mxrun_root());
     }
 
-    fn remove_xrun_root(&self) {
-        XrunRoot::path().into_iter().for_each(|path| {
+    fn remove_mxrun_root(&self) {
+        MxrunRoot::path().into_iter().for_each(|path| {
             std::fs::remove_dir_all(path)
                 .ok()
                 .into_iter()
@@ -423,9 +423,9 @@ impl InputReader {
         let (tx, rx) = mpsc::channel();
 
         thread::Builder::new()
-            .name("xrun-input".to_string())
+            .name("mxrun-input".to_string())
             .spawn(move || Self::run(tx))
-            .map_err(|err| format!("xrun: failed to start input thread: {err}"))?;
+            .map_err(|err| format!("mxrun: failed to start input thread: {err}"))?;
 
         Ok(rx)
     }
@@ -592,14 +592,14 @@ impl JobState {
 
     fn read_new_log_bytes(&mut self, max: usize) -> Result<Vec<u8>, String> {
         File::open(&self.log_path)
-            .map_err(|err| format!("xrun: failed to open log file: {err}"))
+            .map_err(|err| format!("mxrun: failed to open log file: {err}"))
             .and_then(|mut file| {
                 file.seek(SeekFrom::Start(self.log_offset))
-                    .map_err(|err| format!("xrun: failed to seek log file: {err}"))?;
+                    .map_err(|err| format!("mxrun: failed to seek log file: {err}"))?;
                 let mut bytes = vec![0_u8; max];
                 let read_len = file
                     .read(&mut bytes)
-                    .map_err(|err| format!("xrun: failed to read log file: {err}"))?;
+                    .map_err(|err| format!("mxrun: failed to read log file: {err}"))?;
                 bytes.truncate(read_len);
                 self.log_offset = self
                     .log_offset
@@ -649,11 +649,11 @@ impl JobState {
     }
 }
 
-struct XrunRoot;
+struct MxrunRoot;
 
-impl XrunRoot {
+impl MxrunRoot {
     fn path() -> Option<&'static Path> {
-        Some(Path::new(".xrun"))
+        Some(Path::new(".mxrun"))
     }
 }
 
@@ -741,11 +741,11 @@ struct TerminalGuard {
 
 impl TerminalGuard {
     fn enter() -> Result<Self, String> {
-        enable_raw_mode().map_err(|err| format!("xrun: failed to enable raw mode: {err}"))?;
+        enable_raw_mode().map_err(|err| format!("mxrun: failed to enable raw mode: {err}"))?;
         execute!(std::io::stdout(), EnterAlternateScreen)
-            .map_err(|err| format!("xrun: failed to enter alternate screen: {err}"))?;
+            .map_err(|err| format!("mxrun: failed to enter alternate screen: {err}"))?;
         Terminal::new(CrosstermBackend::new(std::io::stdout()))
-            .map_err(|err| format!("xrun: failed to create terminal: {err}"))
+            .map_err(|err| format!("mxrun: failed to create terminal: {err}"))
             .map(|terminal| Self { terminal })
     }
 

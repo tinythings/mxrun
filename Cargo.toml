@@ -1,9 +1,16 @@
 [package]
-name = "xrun"
+name = "mxrun"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Run one build entry across local and remote machines in parallel"
 license = "MIT"
 readme = "README.md"
+repository = "https://github.com/tinythings/mxrun"
+homepage = "https://github.com/tinythings/mxrun"
+documentation = "https://docs.rs/mxrun"
+keywords = ["build", "remote", "parallel", "tui", "rsync"]
+categories = ["command-line-utilities", "development-tools"]
 
 [workspace]
 
