@@ -1,7 +1,9 @@
 use std::{fs, path::Path};
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
 use crate::{
-    app::{JobEvent, JobState, LOG_READ_MAX, LOG_TICK_MAX},
+    app::{JobEvent, JobState, KeyPress, LOG_READ_MAX, LOG_TICK_MAX},
     model::{BuildTarget, ResultMirrorPlan, MxrunConfig},
     runner::BuildJob,
 };
@@ -122,6 +124,32 @@ fn job_state_updates_rendered_lines_for_error_events() {
     );
 
     fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn should_quit_finished_accepts_q_key() {
+    let q = KeyPress::from_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+    let upper_q = KeyPress::from_key(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::NONE));
+
+    assert!(q.should_quit_finished());
+    assert!(upper_q.should_quit_finished());
+}
+
+#[test]
+fn should_quit_finished_accepts_ctrl_c() {
+    let ctrl_c = KeyPress::from_key(KeyEvent::new(
+        KeyCode::Char('c'),
+        KeyModifiers::CONTROL,
+    ));
+
+    assert!(ctrl_c.should_quit_finished());
+}
+
+#[test]
+fn should_quit_finished_accepts_p_preserve_quit() {
+    let p = KeyPress::from_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+
+    assert!(p.should_quit_finished());
 }
 
 fn uniq() -> String {

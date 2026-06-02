@@ -25,6 +25,7 @@ fn local_job_writes_full_log_file_from_pty() {
         log_path.clone(),
         PathBuf::from("/tmp/sysinspect"),
         ResultMirrorPlan::disabled(PathBuf::from("/tmp/mxrun"), "dev"),
+        crate::runner::RunMode::Run,
     );
     let result = job.run().expect("local PTY job should run");
 
