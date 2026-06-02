@@ -125,9 +125,11 @@ impl<'a> AppLoop<'a> {
     }
 
     fn refresh_logs(&mut self) -> bool {
-        self.states
-            .iter_mut()
-            .fold(false, |busy, st| st.refresh_log() || busy)
+        let mut busy = false;
+        for st in self.states.iter_mut() {
+            busy = st.refresh_log() || busy;
+        }
+        busy
     }
 
     fn refresh_load(&mut self) {

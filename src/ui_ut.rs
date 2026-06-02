@@ -68,7 +68,7 @@ fn build_screen_renders_tiled_terminal_viewports() {
 }
 
 #[test]
-fn tile_status_renders_purple_bar_with_black_text_when_building() {
+fn tile_status_renders_purple_bar_with_white_text_when_building() {
     let backend = TestBackend::new(80, 3);
     let mut terminal = Terminal::new(backend).expect("test terminal should be created");
 
@@ -88,7 +88,7 @@ fn tile_status_renders_purple_bar_with_black_text_when_building() {
             .cell((40, 0))
             .expect("cell should exist")
             .fg,
-        Color::Black
+        Color::White
     );
     assert_eq!(
         terminal

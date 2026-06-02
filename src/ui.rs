@@ -254,6 +254,9 @@ impl TileStatus {
             + load_width;
         let pad = (area.width as usize).saturating_sub(fixed);
 
+        let is_running = matches!(self.stage, JobStage::Pending | JobStage::Building | JobStage::Mirroring);
+        let stage_fg = if is_running { white } else { black };
+
         let mut status_spans: Vec<Span> = vec![
             Span::styled("╰", border_style),
             Span::styled("─", border_style),
@@ -264,12 +267,11 @@ impl TileStatus {
             Span::styled("\u{E0B2}", Style::default().fg(b).bg(a)),
             Span::styled(host_text, black.bg(b)),
             Span::styled("\u{E0B2}", Style::default().fg(g).bg(b)),
-            Span::styled(stage_text, black.bg(g)),
+            Span::styled(stage_text, stage_fg.bg(g)),
         ];
 
         if !self.load_info.is_empty() {
-            let dot_style = Style::default().fg(b).bg(g).add_modifier(ratatui::style::Modifier::BOLD);
-            status_spans.push(Span::styled(" \u{B7} ", dot_style));
+            status_spans.push(Span::styled(" \u{2726} ", white.bg(g)));
             status_spans.push(Span::styled(format!(" {} ", self.load_info), white.bg(g)));
         }
 
