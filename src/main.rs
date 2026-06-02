@@ -25,6 +25,8 @@ use app::MxrunApp;
 use model::{ResultMirrorPlan, MxrunConfig};
 use runner::BuildPlan;
 
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 struct App;
 
 impl App {

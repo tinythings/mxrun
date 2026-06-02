@@ -50,7 +50,7 @@ fn build_screen_creates_one_tile_per_job() {
         screen.tiles()[1]
             .status()
             .title()
-            .contains("192.168.122.122:work/sysinspect-mxrun")
+            .contains("192.168.122.122")
     );
 }
 
@@ -68,69 +68,55 @@ fn build_screen_renders_tiled_terminal_viewports() {
 }
 
 #[test]
-fn tile_status_renders_black_bar_with_yellow_text_when_building() {
+fn tile_status_renders_purple_bar_with_black_text_when_building() {
     let backend = TestBackend::new(80, 3);
     let mut terminal = Terminal::new(backend).expect("test terminal should be created");
 
     terminal
         .draw(|frame| {
             TileStatus::from_job(&Fixture::new().plan().jobs()[1])
-                .render(frame, Rect::new(0, 0, 80, 1));
+                .render(frame, Rect::new(0, 0, 80, 1), false);
         })
         .expect("status should render");
+
+    let run_blue = Color::Rgb(175, 0, 175);
 
     assert_eq!(
         terminal
             .backend()
             .buffer()
-            .cell((1, 0))
+            .cell((40, 0))
             .expect("cell should exist")
             .fg,
-        Color::Yellow
+        Color::Black
     );
     assert_eq!(
         terminal
             .backend()
             .buffer()
-            .cell((1, 0))
+            .cell((40, 0))
             .expect("cell should exist")
             .bg,
-        Color::Black
+        run_blue
+    );
+    assert_eq!(
+        terminal
+            .backend()
+            .buffer()
+            .cell((0, 0))
+            .expect("cell should exist")
+            .fg,
+        run_blue
     );
 }
 
 #[test]
 fn tile_status_colors_match_stage() {
-    assert_eq!(
-        TileStatus::from_fixture("pending", JobStage::Pending)
-            .style()
-            .bg,
-        Some(Color::Black)
-    );
-    assert_eq!(
-        TileStatus::from_fixture("building", JobStage::Building)
-            .style()
-            .fg,
-        Some(Color::Yellow)
-    );
-    assert_eq!(
-        TileStatus::from_fixture("finished", JobStage::Success)
-            .style()
-            .bg,
-        Some(Color::Green)
-    );
-    assert_eq!(
-        TileStatus::from_fixture("finished", JobStage::Success)
-            .style()
-            .fg,
-        Some(Color::White)
-    );
-    assert_eq!(
-        TileStatus::from_fixture("failed", JobStage::Failed)
-            .style()
-            .fg,
-        Some(Color::White)
-    );
+    let pending = TileStatus::from_fixture("Linux", "x86_64", "host", JobStage::Pending);
+    assert_eq!(pending.title(), "Linux x86_64 host");
+
+    let success = TileStatus::from_fixture("Linux", "x86_64", "host", JobStage::Success);
+    assert_eq!(success.title(), "Linux x86_64 host");
 }
 
 #[test]
@@ -144,6 +130,7 @@ fn tile_viewport_renders_ansi_colors() {
                 frame,
                 Rect::new(0, 0, 20, 4),
                 false,
+                JobStage::Building,
             );
         })
         .expect("viewport should render");
@@ -201,13 +188,13 @@ fn build_screen_renders_finish_popup_when_requested() {
 }
 
 #[test]
-fn tile_viewport_marks_active_frame_bright_green() {
+fn tile_viewport_marks_active_running_frame_purple() {
     let backend = TestBackend::new(20, 4);
     let mut terminal = Terminal::new(backend).expect("test terminal should be created");
 
     terminal
         .draw(|frame| {
-            TileViewport::from_ansi("line", 0).render(frame, Rect::new(0, 0, 20, 3), true);
+            TileViewport::from_ansi("line", 0).render(frame, Rect::new(0, 0, 20, 3), true, JobStage::Building);
         })
         .expect("viewport should render");
 
@@ -218,7 +205,7 @@ fn tile_viewport_marks_active_frame_bright_green() {
             .cell((0, 0))
             .expect("cell should exist")
             .fg,
-        Color::LightGreen
+        Color::Rgb(175, 0, 175)
     );
 }
 

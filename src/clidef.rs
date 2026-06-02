@@ -5,7 +5,7 @@ use colored::Colorize;
 use std::path::PathBuf;
 
 pub static APPNAME: &str = "mxrun";
-pub static VERSION: &str = "0.1.0";
+use crate::VERSION;
 
 pub fn cli() -> Command {
     Command::new(APPNAME)

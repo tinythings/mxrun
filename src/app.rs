@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crossterm::{
@@ -67,6 +67,7 @@ struct AppLoop<'a> {
     popup: Option<PopupState>,
     popup_dismissed: bool,
     wrap_lines: bool,
+    last_load_update: Instant,
 }
 
 impl<'a> AppLoop<'a> {
@@ -89,6 +90,7 @@ impl<'a> AppLoop<'a> {
             popup: None,
             popup_dismissed: false,
             wrap_lines,
+            last_load_update: Instant::now(),
         }
     }
 
@@ -96,6 +98,7 @@ impl<'a> AppLoop<'a> {
         loop {
             let busy = self.drain_events();
             let busy = self.refresh_logs() || busy;
+            self.refresh_load();
             self.refresh_popup();
             self.render()?;
 
@@ -125,6 +128,13 @@ impl<'a> AppLoop<'a> {
         self.states
             .iter_mut()
             .fold(false, |busy, st| st.refresh_log() || busy)
+    }
+
+    fn refresh_load(&mut self) {
+        if self.last_load_update.elapsed() >= Duration::from_secs(1) {
+            self.states.iter_mut().for_each(|st| st.update_load());
+            self.last_load_update = Instant::now();
+        }
     }
 
     fn render(&mut self) -> Result<(), String> {
@@ -302,11 +312,11 @@ impl KeyPress {
     }
 
     fn should_quit_live(&self) -> bool {
-        self.is_escape() || self.is_any_quit_char()
+        self.is_escape()
     }
 
     fn should_abort_requested(&self) -> bool {
-        self.is_ctrl_c()
+        self.is_ctrl_c() || self.is_any_quit_char()
     }
 
     fn should_abort_confirmed(&self) -> bool {
@@ -526,6 +536,7 @@ pub struct JobState {
     stage: JobStage,
     done: Option<JobStage>,
     status_code: i32,
+    load_info: String,
 }
 
 impl JobState {
@@ -539,6 +550,7 @@ impl JobState {
             stage: JobStage::Pending,
             done: None,
             status_code: 0,
+            load_info: String::new(),
         }
     }
 
@@ -635,6 +647,10 @@ impl JobState {
         self.stage
     }
 
+    pub fn load_info(&self) -> &str {
+        &self.load_info
+    }
+
     pub fn is_finished(&self) -> bool {
         self.stage.is_finished()
     }
@@ -645,6 +661,14 @@ impl JobState {
 
     pub fn status_code(&self) -> i32 {
         self.status_code
+    }
+
+    pub(crate) fn update_load(&mut self) {
+        if matches!(self.stage, JobStage::Building) {
+            self.load_info = system_load();
+        } else {
+            self.load_info.clear();
+        }
     }
 
     fn finish_if_drained(&mut self) {
@@ -695,6 +719,17 @@ impl JobStage {
     fn is_success(&self) -> bool {
         matches!(self, Self::Success)
     }
+}
+
+fn system_load() -> String {
+    std::fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|s| {
+            s.split_whitespace()
+                .next()
+                .map(|v| format!("CPU: {}", v))
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) struct JobEvent {
