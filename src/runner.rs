@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use crate::model::{BuildTarget, ResultMirrorPlan, MxrunConfig};
+use crate::model::{BuildTarget, MxrunConfig, ResultMirrorPlan};
 use portable_pty::{CommandBuilder, PtySize, PtySystem, native_pty_system};
 
 pub struct BuildPlan {
@@ -903,7 +903,9 @@ impl<'a> PtySession<'a> {
                         Self::capture(reader, log_path).and_then(|capture| {
                             child
                                 .wait()
-                                .map_err(|err| format!("mxrun: failed to wait for PTY child: {err}"))
+                                .map_err(|err| {
+                                    format!("mxrun: failed to wait for PTY child: {err}")
+                                })
                                 .map(|status| (capture, status))
                         })
                     })

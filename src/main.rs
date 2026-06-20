@@ -23,7 +23,7 @@ use std::{env, fs, process};
 use clap::ArgMatches;
 
 use app::MxrunApp;
-use model::{ResultMirrorPlan, MxrunConfig};
+use model::{MxrunConfig, ResultMirrorPlan};
 use runner::BuildPlan;
 
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -211,7 +211,8 @@ impl ConfigFile {
     }
 
     fn load() -> MxrunConfig {
-        MxrunConfig::parse(&Self::read()).unwrap_or_else(|err| Fatal::raise(&format!("mxrun: {err}")))
+        MxrunConfig::parse(&Self::read())
+            .unwrap_or_else(|err| Fatal::raise(&format!("mxrun: {err}")))
     }
 
     fn read_or_create(path: &PathBuf) -> Result<String, String> {

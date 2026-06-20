@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::{JobStage, JobState, PopupState};
+use crate::palette;
 
 #[cfg(test)]
 use crate::runner::BuildPlan;
@@ -105,7 +106,12 @@ impl<'a> BuildTile<'a> {
         }
     }
 
-    pub fn from_state(state: &'a JobState, active: bool, scrollback: usize, wrap_lines: bool) -> Self {
+    pub fn from_state(
+        state: &'a JobState,
+        active: bool,
+        scrollback: usize,
+        wrap_lines: bool,
+    ) -> Self {
         Self {
             active,
             status: TileStatus::from_state(state),
@@ -117,7 +123,8 @@ impl<'a> BuildTile<'a> {
         let layout = TileLayout::new(area).split();
 
         frame.render_widget(Clear, area);
-        self.viewport.render(frame, layout.viewport(), self.active, self.status.stage());
+        self.viewport
+            .render(frame, layout.viewport(), self.active, self.status.stage());
         self.status.render(frame, layout.status(), self.active);
     }
 
@@ -136,20 +143,29 @@ pub struct TileStatus {
     stage: JobStage,
 }
 
-fn run_m() -> Color { Color::Rgb(175, 0, 175) }
-fn run_a() -> Color { Color::Rgb(175, 0, 255) }
-fn run_b() -> Color { Color::Rgb(175, 95, 255) }
-fn ok_m() -> Color { Color::Rgb(95, 175, 0) }
-fn ok_a() -> Color { Color::Rgb(95, 215, 0) }
-fn ok_b() -> Color { Color::Rgb(95, 255, 0) }
-fn err_m() -> Color { Color::Rgb(255, 0, 0) }
-fn err_a() -> Color { Color::Rgb(175, 0, 0) }
-fn err_b() -> Color { Color::Rgb(215, 95, 0) }
+fn run_m() -> Color {
+    Color::Rgb(175, 0, 175)
+}
+fn run_a() -> Color {
+    Color::Rgb(175, 0, 255)
+}
+fn run_b() -> Color {
+    Color::Rgb(175, 95, 255)
+}
+fn err_m() -> Color {
+    Color::Rgb(255, 0, 0)
+}
+fn err_a() -> Color {
+    Color::Rgb(175, 0, 0)
+}
+fn err_b() -> Color {
+    Color::Rgb(215, 95, 0)
+}
 
 fn m_color(stage: JobStage) -> Color {
     match stage {
         JobStage::Failed => err_m(),
-        JobStage::Success => ok_m(),
+        JobStage::Success => palette::SUCCESS_GLOW,
         _ => run_m(),
     }
 }
@@ -157,7 +173,7 @@ fn m_color(stage: JobStage) -> Color {
 fn a_color(stage: JobStage) -> Color {
     match stage {
         JobStage::Failed => err_a(),
-        JobStage::Success => ok_a(),
+        JobStage::Success => palette::SUCCESS_HEAT,
         _ => run_a(),
     }
 }
@@ -165,8 +181,16 @@ fn a_color(stage: JobStage) -> Color {
 fn b_color(stage: JobStage) -> Color {
     match stage {
         JobStage::Failed => err_b(),
-        JobStage::Success => ok_b(),
+        JobStage::Success => palette::SUCCESS_PEAK,
         _ => run_b(),
+    }
+}
+
+fn s_color(stage: JobStage) -> Color {
+    match stage {
+        JobStage::Success => palette::SUCCESS,
+        JobStage::Failed => err_m(),
+        _ => run_m(),
     }
 }
 
@@ -189,7 +213,11 @@ impl TileStatus {
         let os = parts.next().unwrap_or("").to_string();
         let platform = parts.next().unwrap_or("").to_string();
         let destination = parts.next().unwrap_or("");
-        let hostname = destination.split(':').next().unwrap_or(destination).to_string();
+        let hostname = destination
+            .split(':')
+            .next()
+            .unwrap_or(destination)
+            .to_string();
         Self {
             os,
             platform,
@@ -215,10 +243,13 @@ impl TileStatus {
     fn border_color(&self, active: bool) -> Color {
         if matches!(self.stage, JobStage::Failed) {
             err_m()
-        } else if matches!(self.stage, JobStage::Pending | JobStage::Building | JobStage::Mirroring) {
+        } else if matches!(
+            self.stage,
+            JobStage::Pending | JobStage::Building | JobStage::Mirroring
+        ) {
             run_m()
         } else if active {
-            ok_m()
+            palette::SUCCESS_GLOW
         } else {
             Color::Reset
         }
@@ -230,10 +261,15 @@ impl TileStatus {
         let g = m_color(self.stage);
         let a = a_color(self.stage);
         let b = b_color(self.stage);
+        let s = s_color(self.stage);
         let border = self.border_color(active);
         let border_style = Style::default().fg(border);
-        let black = Style::default().fg(Color::Black).add_modifier(ratatui::style::Modifier::BOLD);
-        let white = Style::default().fg(Color::White).add_modifier(ratatui::style::Modifier::BOLD);
+        let black = Style::default()
+            .fg(Color::Black)
+            .add_modifier(ratatui::style::Modifier::BOLD);
+        let white = Style::default()
+            .fg(Color::White)
+            .add_modifier(ratatui::style::Modifier::BOLD);
 
         let os_text = format!(" {} ", self.os);
         let platform_text = format!(" {} ", self.platform);
@@ -246,44 +282,45 @@ impl TileStatus {
             3 + self.load_info.len() + 2
         };
 
-        let fixed = 9
+        let title_width = 5
             + os_text.len()
             + platform_text.len()
             + host_text.len()
             + stage_text.len()
             + load_width;
-        let pad = (area.width as usize).saturating_sub(fixed);
+        let fill = (area.width as usize).saturating_sub(2 + title_width);
+        let left_fill = fill / 2;
+        let right_fill = fill - left_fill;
 
-        let is_running = matches!(self.stage, JobStage::Pending | JobStage::Building | JobStage::Mirroring);
+        let is_running = matches!(
+            self.stage,
+            JobStage::Pending | JobStage::Building | JobStage::Mirroring
+        );
         let stage_fg = if is_running { white } else { black };
 
         let mut status_spans: Vec<Span> = vec![
             Span::styled("╰", border_style),
-            Span::styled("─", border_style),
+            Span::styled("─".repeat(left_fill), border_style),
             Span::styled("\u{E0B2}", Style::default().fg(g)),
             Span::styled(os_text, black.bg(g)),
             Span::styled("\u{E0B2}", Style::default().fg(a).bg(g)),
             Span::styled(platform_text, black.bg(a)),
             Span::styled("\u{E0B2}", Style::default().fg(b).bg(a)),
             Span::styled(host_text, black.bg(b)),
-            Span::styled("\u{E0B2}", Style::default().fg(g).bg(b)),
-            Span::styled(stage_text, stage_fg.bg(g)),
+            Span::styled("\u{E0B2}", Style::default().fg(s).bg(b)),
+            Span::styled(stage_text, stage_fg.bg(s)),
         ];
 
         if !self.load_info.is_empty() {
-            status_spans.push(Span::styled(" \u{2726} ", white.bg(g)));
-            status_spans.push(Span::styled(format!(" {} ", self.load_info), white.bg(g)));
+            status_spans.push(Span::styled(" \u{2726} ", white.bg(s)));
+            status_spans.push(Span::styled(format!(" {} ", self.load_info), white.bg(s)));
         }
 
-        status_spans.push(Span::styled(" ".repeat(pad), Style::default().bg(g)));
-        status_spans.push(Span::styled("\u{E0B0}", border_style));
-        status_spans.push(Span::styled("─", border_style));
+        status_spans.push(Span::styled("\u{E0B0}", Style::default().fg(s)));
+        status_spans.push(Span::styled("─".repeat(right_fill), border_style));
         status_spans.push(Span::styled("╯", border_style));
 
-        frame.render_widget(
-            Paragraph::new(Line::from(status_spans)),
-            area,
-        );
+        frame.render_widget(Paragraph::new(Line::from(status_spans)), area);
     }
 
     #[cfg(test)]
@@ -313,7 +350,11 @@ impl TileViewport<'static> {
     }
 
     pub fn from_ansi(source: &str, scrollback: usize) -> Self {
-        Self::from_owned_lines(crate::ansi::AnsiDocument::parse(source).lines(), scrollback, false)
+        Self::from_owned_lines(
+            crate::ansi::AnsiDocument::parse(source).lines(),
+            scrollback,
+            false,
+        )
     }
 
     fn from_owned_lines(lines: Vec<Line<'static>>, scrollback: usize, wrap_lines: bool) -> Self {
@@ -443,11 +484,14 @@ impl<'a> TileViewport<'a> {
         if matches!(stage, JobStage::Failed) {
             return Style::default().fg(err_m());
         }
-        if matches!(stage, JobStage::Pending | JobStage::Building | JobStage::Mirroring) {
+        if matches!(
+            stage,
+            JobStage::Pending | JobStage::Building | JobStage::Mirroring
+        ) {
             return Style::default().fg(run_m());
         }
         if active {
-            Style::default().fg(ok_m())
+            Style::default().fg(palette::SUCCESS_GLOW)
         } else {
             Style::default()
         }
@@ -571,11 +615,7 @@ impl FinishPopup {
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
         frame.render_widget(
-            Paragraph::new(Line::styled(
-                self.text,
-                self.text_style(),
-            ))
-            .wrap(Wrap { trim: false }),
+            Paragraph::new(Line::styled(self.text, self.text_style())).wrap(Wrap { trim: false }),
             inner,
         );
     }

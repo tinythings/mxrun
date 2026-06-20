@@ -266,7 +266,6 @@ impl<'a> AppLoop<'a> {
             })
             .unwrap_or(10)
     }
-
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -693,11 +692,7 @@ impl JobStage {
 fn system_load() -> String {
     std::fs::read_to_string("/proc/loadavg")
         .ok()
-        .and_then(|s| {
-            s.split_whitespace()
-                .next()
-                .map(|v| format!("CPU: {}", v))
-        })
+        .and_then(|s| s.split_whitespace().next().map(|v| format!("CPU: {}", v)))
         .unwrap_or_default()
 }
 
