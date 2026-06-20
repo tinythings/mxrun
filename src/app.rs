@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     thread,
     time::{Duration, Instant},
@@ -191,7 +191,6 @@ impl<'a> AppLoop<'a> {
         }
         if self.popup.is_some() {
             if key.should_quit_finished() {
-                self.cleanup_logs_for(key);
                 return true;
             }
             self.popup = None;
@@ -227,7 +226,6 @@ impl<'a> AppLoop<'a> {
 
     fn handle_finished_key(&mut self, key: KeyPress) -> bool {
         if key.should_quit_finished() {
-            self.cleanup_logs_for(key);
             return true;
         }
         key.navigation()
@@ -269,21 +267,6 @@ impl<'a> AppLoop<'a> {
             .unwrap_or(10)
     }
 
-    fn cleanup_logs_for(&self, key: KeyPress) {
-        key.should_cleanup_logs()
-            .then_some(())
-            .into_iter()
-            .for_each(|_| self.remove_mxrun_root());
-    }
-
-    fn remove_mxrun_root(&self) {
-        MxrunRoot::path().into_iter().for_each(|path| {
-            std::fs::remove_dir_all(path)
-                .ok()
-                .into_iter()
-                .for_each(drop)
-        });
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -326,11 +309,7 @@ impl KeyPress {
     }
 
     pub(crate) fn should_quit_finished(&self) -> bool {
-        self.is_preserve_quit() || self.is_ctrl_c() || self.is_any_quit_char()
-    }
-
-    fn should_cleanup_logs(&self) -> bool {
-        self.is_ctrl_c()
+        self.is_ctrl_c() || self.is_any_quit_char()
     }
 
     fn navigation(&self) -> Option<PaneDirection> {
@@ -372,10 +351,6 @@ impl KeyPress {
             KeyCode::Char(ch) => ch.eq_ignore_ascii_case(&'q'),
             _ => false,
         }
-    }
-
-    fn is_preserve_quit(&self) -> bool {
-        self.code == KeyCode::Char('p')
     }
 
     fn is_abort_yes(&self) -> bool {
@@ -683,14 +658,6 @@ impl JobState {
         std::fs::metadata(&self.log_path)
             .map(|meta| meta.len() <= self.log_offset)
             .unwrap_or(true)
-    }
-}
-
-struct MxrunRoot;
-
-impl MxrunRoot {
-    fn path() -> Option<&'static Path> {
-        Some(Path::new(".mxrun"))
     }
 }
 

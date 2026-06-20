@@ -8,6 +8,7 @@ mod clidef;
 mod model;
 #[cfg(test)]
 mod model_ut;
+mod palette;
 mod runner;
 #[cfg(test)]
 mod runner_ut;
@@ -77,6 +78,7 @@ impl Command {
     }
 
     fn init(&self) -> i32 {
+        LogRoot::clean("init");
         MxrunApp::new(
             BuildPlan::init(&ConfigFile::load(), &RepoRoot::path()),
             false,
@@ -87,6 +89,7 @@ impl Command {
 
     fn run_entry(&self, options: &RunOptions) -> i32 {
         options.announce_mirroring_contract();
+        LogRoot::clean(options.entry());
         MxrunApp::new(
             BuildPlan::new(
                 &ConfigFile::load(),
@@ -266,6 +269,10 @@ struct LogRoot;
 impl LogRoot {
     fn path(entry: &str) -> std::path::PathBuf {
         RepoRoot::path().join(".mxrun").join("logs").join(entry)
+    }
+
+    fn clean(entry: &str) {
+        let _ = std::fs::remove_dir_all(Self::path(entry));
     }
 }
 

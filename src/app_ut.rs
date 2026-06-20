@@ -145,13 +145,6 @@ fn should_quit_finished_accepts_ctrl_c() {
     assert!(ctrl_c.should_quit_finished());
 }
 
-#[test]
-fn should_quit_finished_accepts_p_preserve_quit() {
-    let p = KeyPress::from_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
-
-    assert!(p.should_quit_finished());
-}
-
 fn uniq() -> String {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

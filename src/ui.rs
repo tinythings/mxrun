@@ -551,7 +551,7 @@ impl FinishPopup {
     pub fn from_state(state: PopupState) -> Self {
         match state {
             PopupState::Finished => Self {
-                text: "Press ^C to quit, \"p\" to quit and preserve logs, any key to continue",
+                text: "Press \"q\" to quit, any key to continue",
             },
             PopupState::AbortConfirm => Self {
                 text: "^C again or \"y\" to abort the running farm, any key to continue",
