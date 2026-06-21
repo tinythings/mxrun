@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::{JobStage, JobState, PopupState};
 use crate::palette;
+use ratatui_glamour::color::blend_1d;
 use ratatui_glamour::surface::render_gradient_rounded_panel;
 
 #[cfg(test)]
@@ -664,6 +665,16 @@ impl GridShape {
     }
 }
 
+fn gradient_text_line(text: &str, stops: &[Color], bg: Color) -> Line<'static> {
+    let colors = blend_1d(text.chars().count().max(1), stops);
+    Line::from(
+        text.chars()
+            .enumerate()
+            .map(|(idx, ch)| Span::styled(ch.to_string(), Style::default().fg(colors[idx]).bg(bg)))
+            .collect::<Vec<_>>(),
+    )
+}
+
 pub struct FinishPopup {
     text: &'static str,
 }
@@ -682,18 +693,37 @@ impl FinishPopup {
 
     pub fn render(&self, frame: &mut Frame<'_>) {
         let area = PopupLayout::new(frame.area(), self.width()).area();
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::White))
-            .style(self.block_style());
-        let inner = block.inner(area);
-
         frame.render_widget(Clear, area);
-        frame.render_widget(block, area);
-        frame.render_widget(
-            Paragraph::new(Line::styled(self.text, self.text_style())).wrap(Wrap { trim: false }),
-            inner,
+        let bg = Color::Indexed(234);
+        let inner = render_gradient_rounded_panel(
+            frame.buffer_mut(),
+            area,
+            Style::default().bg(bg),
+            &[
+                Color::Indexed(205),
+                Color::Indexed(99),
+                Color::Indexed(51),
+                Color::Indexed(99),
+                Color::Indexed(205),
+            ],
+        );
+        let text_line = gradient_text_line(
+            self.text,
+            &[
+                Color::Indexed(229),
+                Color::Indexed(221),
+                Color::Indexed(216),
+                Color::Indexed(210),
+                Color::Indexed(204),
+            ],
+            bg,
+        );
+        let text_y = inner.y + inner.height / 2;
+        frame.buffer_mut().set_line(
+            inner.x + 2,
+            text_y,
+            &text_line,
+            inner.width.saturating_sub(2),
         );
     }
 
@@ -701,29 +731,9 @@ impl FinishPopup {
         self.text
             .chars()
             .count()
-            .saturating_add(4)
+            .saturating_add(6)
             .try_into()
             .unwrap_or(u16::MAX)
-    }
-
-    fn block_style(&self) -> Style {
-        if self.is_abort() {
-            Style::default().bg(Color::Red)
-        } else {
-            Style::default().bg(Color::Cyan)
-        }
-    }
-
-    fn text_style(&self) -> Style {
-        if self.is_abort() {
-            Style::default().bg(Color::Red).fg(Color::White)
-        } else {
-            Style::default().bg(Color::Cyan).fg(Color::White)
-        }
-    }
-
-    fn is_abort(&self) -> bool {
-        self.text.contains("abort the running farm")
     }
 }
 
@@ -738,7 +748,7 @@ impl PopupLayout {
     }
 
     fn area(&self) -> Rect {
-        Layout::vertical([Constraint::Length(3)])
+        Layout::vertical([Constraint::Length(5)])
             .flex(Flex::Center)
             .split(self.area)
             .to_vec()

@@ -186,7 +186,7 @@ fn build_screen_renders_finish_popup_when_requested() {
             .buffer()
             .content()
             .iter()
-            .any(|cell| cell.symbol() == "q" && cell.bg == Color::Cyan && cell.fg == Color::White)
+            .any(|cell| cell.symbol() == "q" && cell.bg == Color::Indexed(234))
     );
 }
 
