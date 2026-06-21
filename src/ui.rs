@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::{JobStage, JobState, PopupState};
 use crate::palette;
+use ratatui_glamour::surface::render_gradient_rounded_panel;
 
 #[cfg(test)]
 use crate::runner::BuildPlan;
@@ -79,8 +80,7 @@ impl<'a> BuildScreen<'a> {
         TileGrid::new(count)
             .split(area)
             .get(active_pane)
-            .map(|tile_area| TileLayout::new(*tile_area).split().viewport())
-            .map(|viewport| viewport.height as usize)
+            .map(|tile_area| tile_area.height.saturating_sub(2) as usize)
             .unwrap_or(1)
     }
 
@@ -120,12 +120,22 @@ impl<'a> BuildTile<'a> {
     }
 
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
-        let layout = TileLayout::new(area).split();
-
         frame.render_widget(Clear, area);
-        self.viewport
-            .render(frame, layout.viewport(), self.active, self.status.stage());
-        self.status.render(frame, layout.status(), self.active);
+        let stops: &[Color] = if matches!(self.status.stage(), JobStage::Failed) {
+            &[palette::ERROR]
+        } else {
+            &[
+                Color::Indexed(205),
+                Color::Indexed(99),
+                Color::Indexed(51),
+                Color::Indexed(99),
+                Color::Indexed(205),
+            ]
+        };
+        let inner =
+            render_gradient_rounded_panel(frame.buffer_mut(), area, Style::default(), stops);
+        self.viewport.render_content(frame, inner);
+        self.status.render_title(frame, area);
     }
 
     #[cfg(test)]
@@ -152,19 +162,10 @@ fn run_a() -> Color {
 fn run_b() -> Color {
     Color::Rgb(175, 95, 255)
 }
-fn err_m() -> Color {
-    Color::Rgb(255, 0, 0)
-}
-fn err_a() -> Color {
-    Color::Rgb(175, 0, 0)
-}
-fn err_b() -> Color {
-    Color::Rgb(215, 95, 0)
-}
 
 fn m_color(stage: JobStage) -> Color {
     match stage {
-        JobStage::Failed => err_m(),
+        JobStage::Failed => palette::ERROR_GLOW,
         JobStage::Success => palette::SUCCESS_GLOW,
         _ => run_m(),
     }
@@ -172,7 +173,7 @@ fn m_color(stage: JobStage) -> Color {
 
 fn a_color(stage: JobStage) -> Color {
     match stage {
-        JobStage::Failed => err_a(),
+        JobStage::Failed => palette::ERROR_HEAT,
         JobStage::Success => palette::SUCCESS_HEAT,
         _ => run_a(),
     }
@@ -180,7 +181,7 @@ fn a_color(stage: JobStage) -> Color {
 
 fn b_color(stage: JobStage) -> Color {
     match stage {
-        JobStage::Failed => err_b(),
+        JobStage::Failed => palette::ERROR_PEAK,
         JobStage::Success => palette::SUCCESS_PEAK,
         _ => run_b(),
     }
@@ -189,7 +190,7 @@ fn b_color(stage: JobStage) -> Color {
 fn s_color(stage: JobStage) -> Color {
     match stage {
         JobStage::Success => palette::SUCCESS,
-        JobStage::Failed => err_m(),
+        JobStage::Failed => palette::ERROR,
         _ => run_m(),
     }
 }
@@ -242,7 +243,7 @@ impl TileStatus {
 
     fn border_color(&self, active: bool) -> Color {
         if matches!(self.stage, JobStage::Failed) {
-            err_m()
+            palette::ERROR_GLOW
         } else if matches!(
             self.stage,
             JobStage::Pending | JobStage::Building | JobStage::Mirroring
@@ -296,7 +297,9 @@ impl TileStatus {
             self.stage,
             JobStage::Pending | JobStage::Building | JobStage::Mirroring
         );
-        let stage_fg = if is_running { white } else { black };
+        let failed = matches!(self.stage, JobStage::Failed);
+        let stage_fg = if is_running || failed { white } else { black };
+        let host_fg = if failed { white } else { black };
 
         let mut status_spans: Vec<Span> = vec![
             Span::styled("╰", border_style),
@@ -306,7 +309,7 @@ impl TileStatus {
             Span::styled("\u{E0B2}", Style::default().fg(a).bg(g)),
             Span::styled(platform_text, black.bg(a)),
             Span::styled("\u{E0B2}", Style::default().fg(b).bg(a)),
-            Span::styled(host_text, black.bg(b)),
+            Span::styled(host_text, host_fg.bg(b)),
             Span::styled("\u{E0B2}", Style::default().fg(s).bg(b)),
             Span::styled(stage_text, stage_fg.bg(s)),
         ];
@@ -321,6 +324,68 @@ impl TileStatus {
         status_spans.push(Span::styled("╯", border_style));
 
         frame.render_widget(Paragraph::new(Line::from(status_spans)), area);
+    }
+
+    fn render_title(&self, frame: &mut Frame<'_>, area: Rect) {
+        let g = m_color(self.stage);
+        let a = a_color(self.stage);
+        let b = b_color(self.stage);
+        let s = s_color(self.stage);
+        let black = Style::default()
+            .fg(Color::Black)
+            .add_modifier(ratatui::style::Modifier::BOLD);
+        let white = Style::default()
+            .fg(Color::White)
+            .add_modifier(ratatui::style::Modifier::BOLD);
+        let is_running = matches!(
+            self.stage,
+            JobStage::Pending | JobStage::Building | JobStage::Mirroring
+        );
+        let failed = matches!(self.stage, JobStage::Failed);
+        let stage_fg = if is_running || failed { white } else { black };
+        let host_fg = if failed { white } else { black };
+
+        let os_text = format!(" {} ", self.os);
+        let platform_text = format!(" {} ", self.platform);
+        let host_text = format!(" {} ", self.hostname);
+        let stage_text = format!(" {} ", self.summary);
+
+        let load_width = if self.load_info.is_empty() {
+            0
+        } else {
+            3 + self.load_info.len() + 2
+        };
+
+        let title_width = 5
+            + os_text.len()
+            + platform_text.len()
+            + host_text.len()
+            + stage_text.len()
+            + load_width;
+
+        let mut title_spans: Vec<Span> = vec![
+            Span::styled("\u{E0B2}", Style::default().fg(g)),
+            Span::styled(os_text, black.bg(g)),
+            Span::styled("\u{E0B2}", Style::default().fg(a).bg(g)),
+            Span::styled(platform_text, black.bg(a)),
+            Span::styled("\u{E0B2}", Style::default().fg(b).bg(a)),
+            Span::styled(host_text, host_fg.bg(b)),
+            Span::styled("\u{E0B2}", Style::default().fg(s).bg(b)),
+            Span::styled(stage_text, stage_fg.bg(s)),
+        ];
+
+        if !self.load_info.is_empty() {
+            title_spans.push(Span::styled(" \u{2726} ", white.bg(s)));
+            title_spans.push(Span::styled(format!(" {} ", self.load_info), white.bg(s)));
+        }
+
+        title_spans.push(Span::styled("\u{E0B0}", Style::default().fg(s)));
+
+        let tw = title_width as u16;
+        let center_x = area.x + area.width.saturating_sub(tw) / 2;
+        let bottom_y = area.y + area.height.saturating_sub(1);
+        let title_rect = Rect::new(center_x, bottom_y, tw.min(area.width), 1);
+        frame.render_widget(Paragraph::new(Line::from(title_spans)), title_rect);
     }
 
     #[cfg(test)]
@@ -391,6 +456,18 @@ impl<'a> TileViewport<'a> {
             );
         } else {
             frame.render_widget(Paragraph::new(visible_lines), inner);
+        }
+    }
+
+    fn render_content(&self, frame: &mut Frame<'_>, area: Rect) {
+        let visible_lines = self.visible_lines(area);
+        if self.wrap_lines {
+            frame.render_widget(
+                Paragraph::new(visible_lines).wrap(Wrap { trim: false }),
+                area,
+            );
+        } else {
+            frame.render_widget(Paragraph::new(visible_lines), area);
         }
     }
 
@@ -482,7 +559,7 @@ impl<'a> TileViewport<'a> {
 
     fn border_style(&self, active: bool, stage: JobStage) -> Style {
         if matches!(stage, JobStage::Failed) {
-            return Style::default().fg(err_m());
+            return Style::default().fg(palette::ERROR_GLOW);
         }
         if matches!(
             stage,
