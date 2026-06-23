@@ -52,9 +52,11 @@ fn remote_job_uses_ssh_tty_and_remote_make_command() {
     );
     let command = job.command().args();
 
-    assert_eq!(command[0], "-tt");
-    assert_eq!(command[1], "192.168.122.122");
-    assert_eq!(command[2], "cd 'work/sysinspect-mxrun' && gmake dev");
+    assert_eq!(command[0], "-o");
+    assert_eq!(command[1], "StrictHostKeyChecking=no");
+    assert_eq!(command[2], "-tt");
+    assert_eq!(command[3], "192.168.122.122");
+    assert_eq!(command[4], "cd 'work/sysinspect-mxrun' && gmake dev");
 }
 
 #[test]

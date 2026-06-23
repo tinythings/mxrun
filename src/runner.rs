@@ -270,6 +270,8 @@ impl BuildCommand {
         Self::new(
             "ssh",
             vec![
+                "-o".to_string(),
+                "StrictHostKeyChecking=no".to_string(),
                 "-tt".to_string(),
                 target.host().to_string(),
                 format!(
@@ -313,6 +315,8 @@ impl<'a> RemoteSync<'a> {
 
     fn ensure_remote_dir_args(&self) -> Vec<String> {
         vec![
+            "-o".to_string(),
+            "StrictHostKeyChecking=no".to_string(),
             self.target.host().to_string(),
             format!("mkdir -p '{}'", self.target.remote_path()),
         ]
@@ -546,6 +550,8 @@ impl<'a> ResultMirror<'a> {
 
     fn capture_remote(host: &str, program: &str, args: &[&str]) -> Result<String, String> {
         Command::new("ssh")
+            .arg("-o")
+            .arg("StrictHostKeyChecking=no")
             .arg(host)
             .arg(program)
             .args(args)
