@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    model::{BuildTarget, ResultMirrorPlan, MxrunConfig},
+    model::{BuildTarget, MxrunConfig, ResultMirrorPlan},
     runner::{BuildCommand, BuildJob, BuildPlan},
 };
 
@@ -74,7 +74,8 @@ fn build_plan_creates_one_job_per_target_with_stable_log_paths() {
     assert_eq!(plan.jobs()[0].log_path(), temp.path().join("local.log"));
     assert_eq!(
         plan.jobs()[1].log_path(),
-        temp.path().join("192.168.122.122_work_sysinspect-mxrun.log")
+        temp.path()
+            .join("192.168.122.122_work_sysinspect-mxrun.log")
     );
 }
 

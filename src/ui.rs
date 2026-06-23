@@ -3,10 +3,16 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Clear, Paragraph, Wrap},
 };
 
+#[cfg(test)]
+use ratatui::widgets::{Block, BorderType, Borders};
+
 use crate::app::{JobStage, JobState, PopupState};
+use crate::palette;
+use ratatui_glamour::color::{blend_1d, blend_2d};
+use ratatui_glamour::surface::render_gradient_rounded_panel;
 
 #[cfg(test)]
 use crate::runner::BuildPlan;
@@ -30,6 +36,7 @@ impl<'a> TileLines<'a> {
 pub struct BuildScreen<'a> {
     tiles: Vec<BuildTile<'a>>,
     popup: Option<FinishPopup>,
+    label: Option<&'a str>,
 }
 
 impl<'a> BuildScreen<'a> {
@@ -38,16 +45,20 @@ impl<'a> BuildScreen<'a> {
         Self {
             tiles: plan.jobs().iter().map(BuildTile::from_job).collect(),
             popup: None,
+            label: None,
         }
     }
 
     pub fn from_states(
         states: &'a [JobState],
-        active_pane: usize,
+        _active_pane: usize,
         scrollbacks: &[usize],
         popup: Option<PopupState>,
         wrap_lines: bool,
+        label: Option<&'a str>,
+        excuse: Option<&'a str>,
     ) -> Self {
+        let any_failed = states.iter().any(JobState::is_failed);
         Self {
             tiles: states
                 .iter()
@@ -55,13 +66,13 @@ impl<'a> BuildScreen<'a> {
                 .map(|(index, state)| {
                     BuildTile::from_state(
                         state,
-                        index == active_pane,
                         *scrollbacks.get(index).unwrap_or(&0),
                         wrap_lines,
                     )
                 })
                 .collect(),
-            popup: popup.map(FinishPopup::from_state),
+            popup: popup.map(|p| FinishPopup::from_state(p, any_failed, excuse)),
+            label,
         }
     }
 
@@ -71,15 +82,39 @@ impl<'a> BuildScreen<'a> {
             .iter()
             .zip(self.tiles.iter())
             .for_each(|(area, tile)| tile.render(frame, *area));
+        self.render_label(frame);
         self.popup.iter().for_each(|popup| popup.render(frame));
+    }
+
+    fn render_label(&self, frame: &mut Frame<'_>) {
+        if let Some(label) = self.label {
+            let area = frame.area();
+            let any_failed = self
+                .tiles
+                .iter()
+                .any(|t| matches!(t.status.stage(), JobStage::Failed));
+            let fg = if any_failed {
+                palette::FG
+            } else {
+                palette::WARNING_HEAT
+            };
+            let styled_label = format!(" {} ", label);
+            let label_width = styled_label.len() as u16;
+            let x = area.x + area.width.saturating_sub(label_width + 3);
+            frame.buffer_mut().set_line(
+                x,
+                area.y,
+                &Line::from(Span::styled(styled_label, Style::default().fg(fg))),
+                label_width,
+            );
+        }
     }
 
     pub fn viewport_height(count: usize, active_pane: usize, area: Rect) -> usize {
         TileGrid::new(count)
             .split(area)
             .get(active_pane)
-            .map(|tile_area| TileLayout::new(*tile_area).split().viewport())
-            .map(|viewport| viewport.height as usize)
+            .map(|tile_area| tile_area.height.saturating_sub(2) as usize)
             .unwrap_or(1)
     }
 
@@ -90,7 +125,6 @@ impl<'a> BuildScreen<'a> {
 }
 
 pub struct BuildTile<'a> {
-    active: bool,
     status: TileStatus,
     viewport: TileViewport<'a>,
 }
@@ -99,26 +133,39 @@ impl<'a> BuildTile<'a> {
     #[cfg(test)]
     pub fn from_job(job: &crate::runner::BuildJob) -> Self {
         Self {
-            active: false,
             status: TileStatus::from_job(job),
             viewport: TileViewport::empty(),
         }
     }
 
-    pub fn from_state(state: &'a JobState, active: bool, scrollback: usize, wrap_lines: bool) -> Self {
+    pub fn from_state(
+        state: &'a JobState,
+        scrollback: usize,
+        wrap_lines: bool,
+    ) -> Self {
         Self {
-            active,
             status: TileStatus::from_state(state),
             viewport: TileViewport::from_lines(state.log_lines(), scrollback, wrap_lines),
         }
     }
 
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
-        let layout = TileLayout::new(area).split();
-
         frame.render_widget(Clear, area);
-        self.viewport.render(frame, layout.viewport(), self.active, self.status.stage());
-        self.status.render(frame, layout.status(), self.active);
+        let stops: &[Color] = if matches!(self.status.stage(), JobStage::Failed) {
+            &[palette::ERROR]
+        } else {
+            &[
+                Color::Indexed(205),
+                Color::Indexed(99),
+                Color::Indexed(51),
+                Color::Indexed(99),
+                Color::Indexed(205),
+            ]
+        };
+        let inner =
+            render_gradient_rounded_panel(frame.buffer_mut(), area, Style::default(), stops);
+        self.viewport.render_content(frame, inner);
+        self.status.render_title(frame, area);
     }
 
     #[cfg(test)]
@@ -136,37 +183,45 @@ pub struct TileStatus {
     stage: JobStage,
 }
 
-fn run_m() -> Color { Color::Rgb(175, 0, 175) }
-fn run_a() -> Color { Color::Rgb(175, 0, 255) }
-fn run_b() -> Color { Color::Rgb(175, 95, 255) }
-fn ok_m() -> Color { Color::Rgb(95, 175, 0) }
-fn ok_a() -> Color { Color::Rgb(95, 215, 0) }
-fn ok_b() -> Color { Color::Rgb(95, 255, 0) }
-fn err_m() -> Color { Color::Rgb(255, 0, 0) }
-fn err_a() -> Color { Color::Rgb(175, 0, 0) }
-fn err_b() -> Color { Color::Rgb(215, 95, 0) }
+fn run_m() -> Color {
+    Color::Rgb(175, 0, 175)
+}
+fn run_a() -> Color {
+    Color::Rgb(175, 0, 255)
+}
+fn run_b() -> Color {
+    Color::Rgb(175, 95, 255)
+}
 
 fn m_color(stage: JobStage) -> Color {
     match stage {
-        JobStage::Failed => err_m(),
-        JobStage::Success => ok_m(),
+        JobStage::Failed => palette::ERROR_GLOW,
+        JobStage::Success => palette::SUCCESS_GLOW,
         _ => run_m(),
     }
 }
 
 fn a_color(stage: JobStage) -> Color {
     match stage {
-        JobStage::Failed => err_a(),
-        JobStage::Success => ok_a(),
+        JobStage::Failed => palette::ERROR_HEAT,
+        JobStage::Success => palette::SUCCESS_HEAT,
         _ => run_a(),
     }
 }
 
 fn b_color(stage: JobStage) -> Color {
     match stage {
-        JobStage::Failed => err_b(),
-        JobStage::Success => ok_b(),
+        JobStage::Failed => palette::ERROR_PEAK,
+        JobStage::Success => palette::SUCCESS_PEAK,
         _ => run_b(),
+    }
+}
+
+fn s_color(stage: JobStage) -> Color {
+    match stage {
+        JobStage::Success => palette::SUCCESS,
+        JobStage::Failed => palette::ERROR,
+        _ => run_m(),
     }
 }
 
@@ -189,7 +244,11 @@ impl TileStatus {
         let os = parts.next().unwrap_or("").to_string();
         let platform = parts.next().unwrap_or("").to_string();
         let destination = parts.next().unwrap_or("");
-        let hostname = destination.split(':').next().unwrap_or(destination).to_string();
+        let hostname = destination
+            .split(':')
+            .next()
+            .unwrap_or(destination)
+            .to_string();
         Self {
             os,
             platform,
@@ -212,28 +271,38 @@ impl TileStatus {
         }
     }
 
+    #[cfg(test)]
     fn border_color(&self, active: bool) -> Color {
         if matches!(self.stage, JobStage::Failed) {
-            err_m()
-        } else if matches!(self.stage, JobStage::Pending | JobStage::Building | JobStage::Mirroring) {
+            palette::ERROR_GLOW
+        } else if matches!(
+            self.stage,
+            JobStage::Pending | JobStage::Building | JobStage::Mirroring
+        ) {
             run_m()
         } else if active {
-            ok_m()
+            palette::SUCCESS_GLOW
         } else {
             Color::Reset
         }
     }
 
+    #[cfg(test)]
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, active: bool) {
         frame.render_widget(Clear, area);
 
         let g = m_color(self.stage);
         let a = a_color(self.stage);
         let b = b_color(self.stage);
+        let s = s_color(self.stage);
         let border = self.border_color(active);
         let border_style = Style::default().fg(border);
-        let black = Style::default().fg(Color::Black).add_modifier(ratatui::style::Modifier::BOLD);
-        let white = Style::default().fg(Color::White).add_modifier(ratatui::style::Modifier::BOLD);
+        let black = Style::default()
+            .fg(Color::Black)
+            .add_modifier(ratatui::style::Modifier::BOLD);
+        let white = Style::default()
+            .fg(Color::White)
+            .add_modifier(ratatui::style::Modifier::BOLD);
 
         let os_text = format!(" {} ", self.os);
         let platform_text = format!(" {} ", self.platform);
@@ -246,44 +315,109 @@ impl TileStatus {
             3 + self.load_info.len() + 2
         };
 
-        let fixed = 9
+        let title_width = 5
             + os_text.len()
             + platform_text.len()
             + host_text.len()
             + stage_text.len()
             + load_width;
-        let pad = (area.width as usize).saturating_sub(fixed);
+        let fill = (area.width as usize).saturating_sub(2 + title_width);
+        let left_fill = fill / 2;
+        let right_fill = fill - left_fill;
 
-        let is_running = matches!(self.stage, JobStage::Pending | JobStage::Building | JobStage::Mirroring);
-        let stage_fg = if is_running { white } else { black };
+        let is_running = matches!(
+            self.stage,
+            JobStage::Pending | JobStage::Building | JobStage::Mirroring
+        );
+        let failed = matches!(self.stage, JobStage::Failed);
+        let stage_fg = if is_running || failed { white } else { black };
+        let host_fg = if failed { white } else { black };
 
         let mut status_spans: Vec<Span> = vec![
             Span::styled("╰", border_style),
-            Span::styled("─", border_style),
+            Span::styled("─".repeat(left_fill), border_style),
             Span::styled("\u{E0B2}", Style::default().fg(g)),
             Span::styled(os_text, black.bg(g)),
             Span::styled("\u{E0B2}", Style::default().fg(a).bg(g)),
             Span::styled(platform_text, black.bg(a)),
             Span::styled("\u{E0B2}", Style::default().fg(b).bg(a)),
-            Span::styled(host_text, black.bg(b)),
-            Span::styled("\u{E0B2}", Style::default().fg(g).bg(b)),
-            Span::styled(stage_text, stage_fg.bg(g)),
+            Span::styled(host_text, host_fg.bg(b)),
+            Span::styled("\u{E0B2}", Style::default().fg(s).bg(b)),
+            Span::styled(stage_text, stage_fg.bg(s)),
         ];
 
         if !self.load_info.is_empty() {
-            status_spans.push(Span::styled(" \u{2726} ", white.bg(g)));
-            status_spans.push(Span::styled(format!(" {} ", self.load_info), white.bg(g)));
+            status_spans.push(Span::styled(" \u{2726} ", white.bg(s)));
+            status_spans.push(Span::styled(format!(" {} ", self.load_info), white.bg(s)));
         }
 
-        status_spans.push(Span::styled(" ".repeat(pad), Style::default().bg(g)));
-        status_spans.push(Span::styled("\u{E0B0}", border_style));
-        status_spans.push(Span::styled("─", border_style));
+        status_spans.push(Span::styled("\u{E0B0}", Style::default().fg(s)));
+        status_spans.push(Span::styled("─".repeat(right_fill), border_style));
         status_spans.push(Span::styled("╯", border_style));
 
-        frame.render_widget(
-            Paragraph::new(Line::from(status_spans)),
-            area,
+        frame.render_widget(Paragraph::new(Line::from(status_spans)), area);
+    }
+
+    fn render_title(&self, frame: &mut Frame<'_>, area: Rect) {
+        let g = m_color(self.stage);
+        let a = a_color(self.stage);
+        let b = b_color(self.stage);
+        let s = s_color(self.stage);
+        let black = Style::default()
+            .fg(Color::Black)
+            .add_modifier(ratatui::style::Modifier::BOLD);
+        let white = Style::default()
+            .fg(Color::White)
+            .add_modifier(ratatui::style::Modifier::BOLD);
+        let is_running = matches!(
+            self.stage,
+            JobStage::Pending | JobStage::Building | JobStage::Mirroring
         );
+        let failed = matches!(self.stage, JobStage::Failed);
+        let stage_fg = if is_running || failed { white } else { black };
+        let host_fg = if failed { white } else { black };
+
+        let os_text = format!(" {} ", self.os);
+        let platform_text = format!(" {} ", self.platform);
+        let host_text = format!(" {} ", self.hostname);
+        let stage_text = format!(" {} ", self.summary);
+
+        let load_width = if self.load_info.is_empty() {
+            0
+        } else {
+            3 + self.load_info.len() + 2
+        };
+
+        let title_width = 5
+            + os_text.len()
+            + platform_text.len()
+            + host_text.len()
+            + stage_text.len()
+            + load_width;
+
+        let mut title_spans: Vec<Span> = vec![
+            Span::styled("\u{E0B2}", Style::default().fg(g)),
+            Span::styled(os_text, black.bg(g)),
+            Span::styled("\u{E0B2}", Style::default().fg(a).bg(g)),
+            Span::styled(platform_text, black.bg(a)),
+            Span::styled("\u{E0B2}", Style::default().fg(b).bg(a)),
+            Span::styled(host_text, host_fg.bg(b)),
+            Span::styled("\u{E0B2}", Style::default().fg(s).bg(b)),
+            Span::styled(stage_text, stage_fg.bg(s)),
+        ];
+
+        if !self.load_info.is_empty() {
+            title_spans.push(Span::styled(" \u{2726} ", white.bg(s)));
+            title_spans.push(Span::styled(format!(" {} ", self.load_info), white.bg(s)));
+        }
+
+        title_spans.push(Span::styled("\u{E0B0}", Style::default().fg(s)));
+
+        let tw = title_width as u16;
+        let center_x = area.x + area.width.saturating_sub(tw) / 2;
+        let bottom_y = area.y + area.height.saturating_sub(1);
+        let title_rect = Rect::new(center_x, bottom_y, tw.min(area.width), 1);
+        frame.render_widget(Paragraph::new(Line::from(title_spans)), title_rect);
     }
 
     #[cfg(test)]
@@ -313,7 +447,11 @@ impl TileViewport<'static> {
     }
 
     pub fn from_ansi(source: &str, scrollback: usize) -> Self {
-        Self::from_owned_lines(crate::ansi::AnsiDocument::parse(source).lines(), scrollback, false)
+        Self::from_owned_lines(
+            crate::ansi::AnsiDocument::parse(source).lines(),
+            scrollback,
+            false,
+        )
     }
 
     fn from_owned_lines(lines: Vec<Line<'static>>, scrollback: usize, wrap_lines: bool) -> Self {
@@ -334,6 +472,7 @@ impl<'a> TileViewport<'a> {
         }
     }
 
+    #[cfg(test)]
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, active: bool, stage: JobStage) {
         let block = Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
@@ -350,6 +489,18 @@ impl<'a> TileViewport<'a> {
             );
         } else {
             frame.render_widget(Paragraph::new(visible_lines), inner);
+        }
+    }
+
+    fn render_content(&self, frame: &mut Frame<'_>, area: Rect) {
+        let visible_lines = self.visible_lines(area);
+        if self.wrap_lines {
+            frame.render_widget(
+                Paragraph::new(visible_lines).wrap(Wrap { trim: false }),
+                area,
+            );
+        } else {
+            frame.render_widget(Paragraph::new(visible_lines), area);
         }
     }
 
@@ -439,25 +590,31 @@ impl<'a> TileViewport<'a> {
             .sum()
     }
 
+    #[cfg(test)]
     fn border_style(&self, active: bool, stage: JobStage) -> Style {
         if matches!(stage, JobStage::Failed) {
-            return Style::default().fg(err_m());
+            return Style::default().fg(palette::ERROR_GLOW);
         }
-        if matches!(stage, JobStage::Pending | JobStage::Building | JobStage::Mirroring) {
+        if matches!(
+            stage,
+            JobStage::Pending | JobStage::Building | JobStage::Mirroring
+        ) {
             return Style::default().fg(run_m());
         }
         if active {
-            Style::default().fg(ok_m())
+            Style::default().fg(palette::SUCCESS_GLOW)
         } else {
             Style::default()
         }
     }
 }
 
+#[cfg(test)]
 pub struct TileLayout {
     area: Rect,
 }
 
+#[cfg(test)]
 impl TileLayout {
     pub fn new(area: Rect) -> Self {
         Self { area }
@@ -471,11 +628,13 @@ impl TileLayout {
     }
 }
 
+#[cfg(test)]
 pub struct SplitTileLayout {
     viewport: Rect,
     status: Rect,
 }
 
+#[cfg(test)]
 impl SplitTileLayout {
     pub fn new(viewport: Rect, status: Rect) -> Self {
         Self { viewport, status }
@@ -543,85 +702,174 @@ impl GridShape {
     }
 }
 
+fn rounded_perimeter(w: usize, h: usize) -> Vec<(u16, u16, &'static str)> {
+    let mut out = Vec::new();
+    if w == 0 || h == 0 {
+        return out;
+    }
+    let w = w as u16;
+    let h = h as u16;
+    out.push((0, 0, "\u{256D}"));
+    for x in 1..w.saturating_sub(1) {
+        out.push((x, 0, "\u{2500}"));
+    }
+    if w > 1 {
+        out.push((w - 1, 0, "\u{256E}"));
+    }
+    for y in 1..h.saturating_sub(1) {
+        out.push((w - 1, y, "\u{2502}"));
+    }
+    if w > 1 && h > 1 {
+        out.push((w - 1, h - 1, "\u{256F}"));
+    }
+    for x in (1..w.saturating_sub(1)).rev() {
+        out.push((x, h - 1, "\u{2500}"));
+    }
+    if h > 1 {
+        out.push((0, h - 1, "\u{2570}"));
+    }
+    for y in (1..h.saturating_sub(1)).rev() {
+        out.push((0, y, "\u{2502}"));
+    }
+    out
+}
+
+fn gradient_text_line(text: &str, stops: &[Color]) -> Line<'static> {
+    let colors = blend_1d(text.chars().count().max(1), stops);
+    Line::from(
+        text.chars()
+            .enumerate()
+            .map(|(idx, ch)| Span::styled(ch.to_string(), Style::default().fg(colors[idx])))
+            .collect::<Vec<_>>(),
+    )
+}
+
 pub struct FinishPopup {
-    text: &'static str,
+    lines: Vec<String>,
+    failed: bool,
 }
 
 impl FinishPopup {
-    pub fn from_state(state: PopupState) -> Self {
-        match state {
-            PopupState::Finished => Self {
-                text: "Press ^C to quit, \"p\" to quit and preserve logs, any key to continue",
-            },
-            PopupState::AbortConfirm => Self {
-                text: "^C again or \"y\" to abort the running farm, any key to continue",
-            },
+    pub fn from_state(state: PopupState, failed: bool, excuse: Option<&str>) -> Self {
+        let mut lines = match state {
+            PopupState::Finished => {
+                vec!["Press \"q\" to quit, any key to continue".to_string()]
+            }
+            PopupState::AbortConfirm => {
+                vec!["^C again or \"y\" to abort the running farm, any key to continue"
+                    .to_string()]
+            }
+        };
+        if let Some(excuse) = excuse {
+            lines.insert(0, format!("  {}", excuse));
         }
+        Self { lines, failed }
     }
 
     pub fn render(&self, frame: &mut Frame<'_>) {
-        let area = PopupLayout::new(frame.area(), self.width()).area();
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::White))
-            .style(self.block_style());
-        let inner = block.inner(area);
-
+        let area = PopupLayout::new(frame.area(), self.width(), self.height()).area();
         frame.render_widget(Clear, area);
-        frame.render_widget(block, area);
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                self.text,
-                self.text_style(),
-            ))
-            .wrap(Wrap { trim: false }),
-            inner,
+        let bg_stops: &[Color] = if self.failed {
+            &[palette::PROCESSING_BASE_DIMMED, palette::BG_2]
+        } else {
+            &[palette::BG_3, palette::BG_2]
+        };
+        let border_stops = &[
+            Color::Indexed(205),
+            Color::Indexed(99),
+            Color::Indexed(51),
+            Color::Indexed(99),
+            Color::Indexed(205),
+        ];
+        let perimeter = rounded_perimeter(area.width as usize, area.height as usize);
+        let colors = blend_1d(perimeter.len().max(1), border_stops);
+        let buf = frame.buffer_mut();
+        for (idx, (x, y, sym)) in perimeter.into_iter().enumerate() {
+            if let Some(cell) = buf.cell_mut((area.x + x, area.y + y)) {
+                cell.set_symbol(sym);
+                cell.set_fg(colors[idx]);
+            }
+        }
+        let inner = Rect::new(
+            area.x + 1,
+            area.y + 1,
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2),
         );
+        let gradient = blend_2d(
+            area.width as usize,
+            area.height as usize,
+            25.0,
+            bg_stops,
+        );
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let idx = y as usize * area.width as usize + x as usize;
+                if let Some(cell) = buf.cell_mut((area.x + x, area.y + y)) {
+                    cell.set_bg(gradient[idx]);
+                }
+            }
+        }
+        let exc_stops: &[Color] = &[
+            Color::Indexed(159),
+            Color::Indexed(153),
+            Color::Indexed(147),
+            Color::Indexed(141),
+            Color::Indexed(135),
+            Color::Indexed(129),
+        ];
+        let quit_stops: &[Color] = &[
+            Color::Indexed(229),
+            Color::Indexed(221),
+            Color::Indexed(216),
+            Color::Indexed(210),
+            Color::Indexed(204),
+        ];
+        let gaps = (inner.height as usize).saturating_sub(self.lines.len());
+        let gap_height = gaps / (self.lines.len() + 1);
+        for (i, line) in self.lines.iter().enumerate() {
+            let stops = if self.failed && i == 0 {
+                exc_stops
+            } else {
+                quit_stops
+            };
+            let text_line = gradient_text_line(line, stops);
+            let y = inner.y + gap_height as u16 + (1 + gap_height) as u16 * i as u16;
+            let text_width = line.chars().count() as u16;
+            let x = inner.x + inner.width.saturating_sub(text_width) / 2;
+            buf.set_line(x, y, &text_line, text_width);
+        }
     }
 
     fn width(&self) -> u16 {
-        self.text
-            .chars()
-            .count()
-            .saturating_add(4)
+        self.lines
+            .iter()
+            .map(|l| l.chars().count())
+            .max()
+            .unwrap_or(0)
+            .saturating_add(6)
             .try_into()
             .unwrap_or(u16::MAX)
     }
 
-    fn block_style(&self) -> Style {
-        if self.is_abort() {
-            Style::default().bg(Color::Red)
-        } else {
-            Style::default().bg(Color::Cyan)
-        }
-    }
-
-    fn text_style(&self) -> Style {
-        if self.is_abort() {
-            Style::default().bg(Color::Red).fg(Color::White)
-        } else {
-            Style::default().bg(Color::Cyan).fg(Color::White)
-        }
-    }
-
-    fn is_abort(&self) -> bool {
-        self.text.contains("abort the running farm")
+    fn height(&self) -> u16 {
+        (self.lines.len() * 2 + 3) as u16
     }
 }
 
 struct PopupLayout {
     area: Rect,
     width: u16,
+    height: u16,
 }
 
 impl PopupLayout {
-    fn new(area: Rect, width: u16) -> Self {
-        Self { area, width }
+    fn new(area: Rect, width: u16, height: u16) -> Self {
+        Self { area, width, height }
     }
 
     fn area(&self) -> Rect {
-        Layout::vertical([Constraint::Length(3)])
+        Layout::vertical([Constraint::Length(self.height)])
             .flex(Flex::Center)
             .split(self.area)
             .to_vec()

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::model::{ResultMirrorPlan, TargetMode, MxrunConfig};
+use crate::model::{MxrunConfig, ResultMirrorPlan, TargetMode};
 
 #[test]
 fn parse_accepts_local_pseudo_host() {

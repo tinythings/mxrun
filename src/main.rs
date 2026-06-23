@@ -5,9 +5,11 @@ mod app;
 #[cfg(test)]
 mod app_ut;
 mod clidef;
+mod excuses;
 mod model;
 #[cfg(test)]
 mod model_ut;
+mod palette;
 mod runner;
 #[cfg(test)]
 mod runner_ut;
@@ -22,7 +24,7 @@ use std::{env, fs, process};
 use clap::ArgMatches;
 
 use app::MxrunApp;
-use model::{ResultMirrorPlan, MxrunConfig};
+use model::{MxrunConfig, ResultMirrorPlan};
 use runner::BuildPlan;
 
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -54,6 +56,7 @@ struct RunOptions {
     mirror_results: bool,
     mirror_root: PathBuf,
     wrap_lines: bool,
+    label: Option<String>,
 }
 
 impl Command {
@@ -77,9 +80,11 @@ impl Command {
     }
 
     fn init(&self) -> i32 {
+        LogRoot::clean("init");
         MxrunApp::new(
             BuildPlan::init(&ConfigFile::load(), &RepoRoot::path()),
             false,
+            None,
         )
         .run()
         .unwrap_or_else(|err| Fatal::raise(&err))
@@ -87,6 +92,7 @@ impl Command {
 
     fn run_entry(&self, options: &RunOptions) -> i32 {
         options.announce_mirroring_contract();
+        LogRoot::clean(options.entry());
         MxrunApp::new(
             BuildPlan::new(
                 &ConfigFile::load(),
@@ -97,6 +103,7 @@ impl Command {
                 options.mirror_plan(),
             ),
             options.wrap_lines(),
+            options.label(),
         )
         .run()
         .unwrap_or_else(|err| Fatal::raise(&err))
@@ -147,6 +154,7 @@ impl RunOptions {
             mirror_results,
             mirror_root: mirror_root.unwrap_or_else(Self::default_mirror_root),
             wrap_lines: clidef::wrap_lines(am),
+            label: clidef::label(am),
         }
     }
 
@@ -168,6 +176,10 @@ impl RunOptions {
 
     fn wrap_lines(&self) -> bool {
         self.wrap_lines
+    }
+
+    fn label(&self) -> Option<&str> {
+        self.label.as_deref()
     }
 
     fn announce_mirroring_contract(&self) {
@@ -208,7 +220,8 @@ impl ConfigFile {
     }
 
     fn load() -> MxrunConfig {
-        MxrunConfig::parse(&Self::read()).unwrap_or_else(|err| Fatal::raise(&format!("mxrun: {err}")))
+        MxrunConfig::parse(&Self::read())
+            .unwrap_or_else(|err| Fatal::raise(&format!("mxrun: {err}")))
     }
 
     fn read_or_create(path: &PathBuf) -> Result<String, String> {
@@ -266,6 +279,10 @@ struct LogRoot;
 impl LogRoot {
     fn path(entry: &str) -> std::path::PathBuf {
         RepoRoot::path().join(".mxrun").join("logs").join(entry)
+    }
+
+    fn clean(entry: &str) {
+        let _ = std::fs::remove_dir_all(Self::path(entry));
     }
 }
 

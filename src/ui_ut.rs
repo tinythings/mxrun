@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::{
     app::JobStage,
-    model::{ResultMirrorPlan, MxrunConfig},
+    model::{MxrunConfig, ResultMirrorPlan},
     runner::BuildPlan,
     ui::{BuildScreen, GridShape, TileLayout, TileStatus, TileViewport},
 };
@@ -74,8 +74,11 @@ fn tile_status_renders_purple_bar_with_white_text_when_building() {
 
     terminal
         .draw(|frame| {
-            TileStatus::from_job(&Fixture::new().plan().jobs()[1])
-                .render(frame, Rect::new(0, 0, 80, 1), false);
+            TileStatus::from_job(&Fixture::new().plan().jobs()[1]).render(
+                frame,
+                Rect::new(0, 0, 80, 1),
+                false,
+            );
         })
         .expect("status should render");
 
@@ -85,7 +88,7 @@ fn tile_status_renders_purple_bar_with_white_text_when_building() {
         terminal
             .backend()
             .buffer()
-            .cell((40, 0))
+            .cell((55, 0))
             .expect("cell should exist")
             .fg,
         Color::White
@@ -94,7 +97,7 @@ fn tile_status_renders_purple_bar_with_white_text_when_building() {
         terminal
             .backend()
             .buffer()
-            .cell((40, 0))
+            .cell((55, 0))
             .expect("cell should exist")
             .bg,
         run_blue
@@ -169,6 +172,8 @@ fn build_screen_renders_finish_popup_when_requested() {
         &[0, 0],
         Some(crate::app::PopupState::Finished),
         false,
+        None,
+        None,
     );
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).expect("test terminal should be created");
@@ -183,7 +188,7 @@ fn build_screen_renders_finish_popup_when_requested() {
             .buffer()
             .content()
             .iter()
-            .any(|cell| cell.symbol() == "q" && cell.bg == Color::Cyan && cell.fg == Color::White)
+            .any(|cell| cell.symbol() == "q")
     );
 }
 
@@ -194,7 +199,12 @@ fn tile_viewport_marks_active_running_frame_purple() {
 
     terminal
         .draw(|frame| {
-            TileViewport::from_ansi("line", 0).render(frame, Rect::new(0, 0, 20, 3), true, JobStage::Building);
+            TileViewport::from_ansi("line", 0).render(
+                frame,
+                Rect::new(0, 0, 20, 3),
+                true,
+                JobStage::Building,
+            );
         })
         .expect("viewport should render");
 

@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     thread,
     time::{Duration, Instant},
@@ -28,14 +28,16 @@ pub struct MxrunApp {
     plan: BuildPlan,
     states: Vec<JobState>,
     wrap_lines: bool,
+    label: Option<String>,
 }
 
 impl MxrunApp {
-    pub fn new(plan: BuildPlan, wrap_lines: bool) -> Self {
+    pub fn new(plan: BuildPlan, wrap_lines: bool, label: Option<&str>) -> Self {
         Self {
             states: plan.jobs().iter().map(JobState::from_job).collect(),
             plan,
             wrap_lines,
+            label: label.map(String::from),
         }
     }
 
@@ -49,6 +51,7 @@ impl MxrunApp {
                         keys,
                         terminal.terminal_mut(),
                         self.wrap_lines,
+                        self.label.as_deref(),
                     )
                     .run()
                 })
@@ -67,6 +70,8 @@ struct AppLoop<'a> {
     popup: Option<PopupState>,
     popup_dismissed: bool,
     wrap_lines: bool,
+    label: Option<String>,
+    excuse: Option<String>,
     last_load_update: Instant,
 }
 
@@ -77,6 +82,7 @@ impl<'a> AppLoop<'a> {
         keys: Receiver<KeyPress>,
         terminal: &'a mut Terminal<CrosstermBackend<std::io::Stdout>>,
         wrap_lines: bool,
+        label: Option<&str>,
     ) -> Self {
         let pane_count = states.len();
 
@@ -90,6 +96,8 @@ impl<'a> AppLoop<'a> {
             popup: None,
             popup_dismissed: false,
             wrap_lines,
+            label: label.map(String::from),
+            excuse: None,
             last_load_update: Instant::now(),
         }
     }
@@ -148,6 +156,8 @@ impl<'a> AppLoop<'a> {
                     &self.scrollbacks,
                     self.popup,
                     self.wrap_lines,
+                    self.label.as_deref(),
+                    self.excuse.as_deref(),
                 )
                 .render(frame)
             })
@@ -158,6 +168,9 @@ impl<'a> AppLoop<'a> {
     fn refresh_popup(&mut self) {
         if self.all_finished() && !self.popup_dismissed {
             self.popup = Some(PopupState::Finished);
+            if self.excuse.is_none() && self.states.iter().any(JobState::is_failed) {
+                self.excuse = Some(crate::excuses::random_excuse().to_string());
+            }
         }
     }
 
@@ -191,7 +204,6 @@ impl<'a> AppLoop<'a> {
         }
         if self.popup.is_some() {
             if key.should_quit_finished() {
-                self.cleanup_logs_for(key);
                 return true;
             }
             self.popup = None;
@@ -227,7 +239,6 @@ impl<'a> AppLoop<'a> {
 
     fn handle_finished_key(&mut self, key: KeyPress) -> bool {
         if key.should_quit_finished() {
-            self.cleanup_logs_for(key);
             return true;
         }
         key.navigation()
@@ -267,22 +278,6 @@ impl<'a> AppLoop<'a> {
                 )
             })
             .unwrap_or(10)
-    }
-
-    fn cleanup_logs_for(&self, key: KeyPress) {
-        key.should_cleanup_logs()
-            .then_some(())
-            .into_iter()
-            .for_each(|_| self.remove_mxrun_root());
-    }
-
-    fn remove_mxrun_root(&self) {
-        MxrunRoot::path().into_iter().for_each(|path| {
-            std::fs::remove_dir_all(path)
-                .ok()
-                .into_iter()
-                .for_each(drop)
-        });
     }
 }
 
@@ -326,11 +321,7 @@ impl KeyPress {
     }
 
     pub(crate) fn should_quit_finished(&self) -> bool {
-        self.is_preserve_quit() || self.is_ctrl_c() || self.is_any_quit_char()
-    }
-
-    fn should_cleanup_logs(&self) -> bool {
-        self.is_ctrl_c()
+        self.is_ctrl_c() || self.is_any_quit_char()
     }
 
     fn navigation(&self) -> Option<PaneDirection> {
@@ -372,10 +363,6 @@ impl KeyPress {
             KeyCode::Char(ch) => ch.eq_ignore_ascii_case(&'q'),
             _ => false,
         }
-    }
-
-    fn is_preserve_quit(&self) -> bool {
-        self.code == KeyCode::Char('p')
     }
 
     fn is_abort_yes(&self) -> bool {
@@ -657,6 +644,10 @@ impl JobState {
         self.stage.is_finished()
     }
 
+    pub fn is_failed(&self) -> bool {
+        matches!(self.stage, JobStage::Failed)
+    }
+
     pub fn is_success(&self) -> bool {
         self.stage.is_success()
     }
@@ -683,14 +674,6 @@ impl JobState {
         std::fs::metadata(&self.log_path)
             .map(|meta| meta.len() <= self.log_offset)
             .unwrap_or(true)
-    }
-}
-
-struct MxrunRoot;
-
-impl MxrunRoot {
-    fn path() -> Option<&'static Path> {
-        Some(Path::new(".mxrun"))
     }
 }
 
@@ -726,11 +709,7 @@ impl JobStage {
 fn system_load() -> String {
     std::fs::read_to_string("/proc/loadavg")
         .ok()
-        .and_then(|s| {
-            s.split_whitespace()
-                .next()
-                .map(|v| format!("CPU: {}", v))
-        })
+        .and_then(|s| s.split_whitespace().next().map(|v| format!("CPU: {}", v)))
         .unwrap_or_default()
 }
 

@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::{
     app::{JobEvent, JobState, KeyPress, LOG_READ_MAX, LOG_TICK_MAX},
-    model::{BuildTarget, ResultMirrorPlan, MxrunConfig},
+    model::{BuildTarget, MxrunConfig, ResultMirrorPlan},
     runner::BuildJob,
 };
 
@@ -137,19 +137,9 @@ fn should_quit_finished_accepts_q_key() {
 
 #[test]
 fn should_quit_finished_accepts_ctrl_c() {
-    let ctrl_c = KeyPress::from_key(KeyEvent::new(
-        KeyCode::Char('c'),
-        KeyModifiers::CONTROL,
-    ));
+    let ctrl_c = KeyPress::from_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
     assert!(ctrl_c.should_quit_finished());
-}
-
-#[test]
-fn should_quit_finished_accepts_p_preserve_quit() {
-    let p = KeyPress::from_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
-
-    assert!(p.should_quit_finished());
 }
 
 fn uniq() -> String {
