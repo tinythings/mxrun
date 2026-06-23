@@ -4,6 +4,9 @@ mxrun runs one build entry across local and remote machines in parallel.
 
 It syncs the project tree, starts the same make target on each machine, and can mirror back only the final artefacts your project lists.
 
+<img width="1200" alt="output" src="https://github.com/user-attachments/assets/b1491064-da88-47c7-b90c-7c3758b63ab6" />
+
+
 ## Why
 
 Projects often need one local build and one or more remote builds, such as FreeBSD or Linux VMs. mxrun keeps that flow in one terminal UI instead of many shells and ad-hoc rsync steps.
