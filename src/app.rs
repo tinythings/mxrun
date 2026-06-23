@@ -166,7 +166,10 @@ impl<'a> AppLoop<'a> {
     }
 
     fn refresh_popup(&mut self) {
-        if self.all_finished() && !self.popup_dismissed {
+        if self.all_finished()
+            && !self.popup_dismissed
+            && !matches!(self.popup, Some(PopupState::Help))
+        {
             self.popup = Some(PopupState::Finished);
             if self.excuse.is_none() && self.states.iter().any(JobState::is_failed) {
                 self.excuse = Some(crate::excuses::random_excuse().to_string());
@@ -199,6 +202,16 @@ impl<'a> AppLoop<'a> {
     }
 
     fn handle_key(&mut self, key: KeyPress) -> bool {
+        if self.popup == Some(PopupState::Help) {
+            if key.is_escape() || key.is_help_requested() {
+                self.popup = None;
+            }
+            return false;
+        }
+        if key.is_help_requested() {
+            self.popup = Some(PopupState::Help);
+            return false;
+        }
         if !self.all_finished() {
             return self.handle_live_key(key);
         }
@@ -285,6 +298,7 @@ impl<'a> AppLoop<'a> {
 pub(crate) enum PopupState {
     Finished,
     AbortConfirm,
+    Help,
 }
 
 #[derive(Clone, Copy)]
@@ -318,6 +332,10 @@ impl KeyPress {
 
     fn should_abort_confirmed(&self) -> bool {
         self.is_ctrl_c() || self.is_abort_yes()
+    }
+
+    fn is_help_requested(&self) -> bool {
+        matches!(self.code, KeyCode::Char('h'))
     }
 
     pub(crate) fn should_quit_finished(&self) -> bool {
