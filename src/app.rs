@@ -71,6 +71,7 @@ struct AppLoop<'a> {
     popup_dismissed: bool,
     wrap_lines: bool,
     label: Option<String>,
+    excuse: Option<String>,
     last_load_update: Instant,
 }
 
@@ -96,6 +97,7 @@ impl<'a> AppLoop<'a> {
             popup_dismissed: false,
             wrap_lines,
             label: label.map(String::from),
+            excuse: None,
             last_load_update: Instant::now(),
         }
     }
@@ -155,6 +157,7 @@ impl<'a> AppLoop<'a> {
                     self.popup,
                     self.wrap_lines,
                     self.label.as_deref(),
+                    self.excuse.as_deref(),
                 )
                 .render(frame)
             })
@@ -165,6 +168,9 @@ impl<'a> AppLoop<'a> {
     fn refresh_popup(&mut self) {
         if self.all_finished() && !self.popup_dismissed {
             self.popup = Some(PopupState::Finished);
+            if self.excuse.is_none() && self.states.iter().any(JobState::is_failed) {
+                self.excuse = Some(crate::excuses::random_excuse().to_string());
+            }
         }
     }
 
@@ -636,6 +642,10 @@ impl JobState {
 
     pub fn is_finished(&self) -> bool {
         self.stage.is_finished()
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self.stage, JobStage::Failed)
     }
 
     pub fn is_success(&self) -> bool {

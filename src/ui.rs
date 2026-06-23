@@ -3,12 +3,15 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Clear, Paragraph, Wrap},
 };
+
+#[cfg(test)]
+use ratatui::widgets::{Block, BorderType, Borders};
 
 use crate::app::{JobStage, JobState, PopupState};
 use crate::palette;
-use ratatui_glamour::color::blend_1d;
+use ratatui_glamour::color::{blend_1d, blend_2d};
 use ratatui_glamour::surface::render_gradient_rounded_panel;
 
 #[cfg(test)]
@@ -48,12 +51,14 @@ impl<'a> BuildScreen<'a> {
 
     pub fn from_states(
         states: &'a [JobState],
-        active_pane: usize,
+        _active_pane: usize,
         scrollbacks: &[usize],
         popup: Option<PopupState>,
         wrap_lines: bool,
         label: Option<&'a str>,
+        excuse: Option<&'a str>,
     ) -> Self {
+        let any_failed = states.iter().any(JobState::is_failed);
         Self {
             tiles: states
                 .iter()
@@ -61,13 +66,12 @@ impl<'a> BuildScreen<'a> {
                 .map(|(index, state)| {
                     BuildTile::from_state(
                         state,
-                        index == active_pane,
                         *scrollbacks.get(index).unwrap_or(&0),
                         wrap_lines,
                     )
                 })
                 .collect(),
-            popup: popup.map(FinishPopup::from_state),
+            popup: popup.map(|p| FinishPopup::from_state(p, any_failed, excuse)),
             label,
         }
     }
@@ -121,7 +125,6 @@ impl<'a> BuildScreen<'a> {
 }
 
 pub struct BuildTile<'a> {
-    active: bool,
     status: TileStatus,
     viewport: TileViewport<'a>,
 }
@@ -130,7 +133,6 @@ impl<'a> BuildTile<'a> {
     #[cfg(test)]
     pub fn from_job(job: &crate::runner::BuildJob) -> Self {
         Self {
-            active: false,
             status: TileStatus::from_job(job),
             viewport: TileViewport::empty(),
         }
@@ -138,12 +140,10 @@ impl<'a> BuildTile<'a> {
 
     pub fn from_state(
         state: &'a JobState,
-        active: bool,
         scrollback: usize,
         wrap_lines: bool,
     ) -> Self {
         Self {
-            active,
             status: TileStatus::from_state(state),
             viewport: TileViewport::from_lines(state.log_lines(), scrollback, wrap_lines),
         }
@@ -271,6 +271,7 @@ impl TileStatus {
         }
     }
 
+    #[cfg(test)]
     fn border_color(&self, active: bool) -> Color {
         if matches!(self.stage, JobStage::Failed) {
             palette::ERROR_GLOW
@@ -286,6 +287,7 @@ impl TileStatus {
         }
     }
 
+    #[cfg(test)]
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, active: bool) {
         frame.render_widget(Clear, area);
 
@@ -470,6 +472,7 @@ impl<'a> TileViewport<'a> {
         }
     }
 
+    #[cfg(test)]
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, active: bool, stage: JobStage) {
         let block = Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
@@ -587,6 +590,7 @@ impl<'a> TileViewport<'a> {
             .sum()
     }
 
+    #[cfg(test)]
     fn border_style(&self, active: bool, stage: JobStage) -> Style {
         if matches!(stage, JobStage::Failed) {
             return Style::default().fg(palette::ERROR_GLOW);
@@ -605,10 +609,12 @@ impl<'a> TileViewport<'a> {
     }
 }
 
+#[cfg(test)]
 pub struct TileLayout {
     area: Rect,
 }
 
+#[cfg(test)]
 impl TileLayout {
     pub fn new(area: Rect) -> Self {
         Self { area }
@@ -622,11 +628,13 @@ impl TileLayout {
     }
 }
 
+#[cfg(test)]
 pub struct SplitTileLayout {
     viewport: Rect,
     status: Rect,
 }
 
+#[cfg(test)]
 impl SplitTileLayout {
     pub fn new(viewport: Rect, status: Rect) -> Self {
         Self { viewport, status }
@@ -694,90 +702,174 @@ impl GridShape {
     }
 }
 
-fn gradient_text_line(text: &str, stops: &[Color], bg: Color) -> Line<'static> {
+fn rounded_perimeter(w: usize, h: usize) -> Vec<(u16, u16, &'static str)> {
+    let mut out = Vec::new();
+    if w == 0 || h == 0 {
+        return out;
+    }
+    let w = w as u16;
+    let h = h as u16;
+    out.push((0, 0, "\u{256D}"));
+    for x in 1..w.saturating_sub(1) {
+        out.push((x, 0, "\u{2500}"));
+    }
+    if w > 1 {
+        out.push((w - 1, 0, "\u{256E}"));
+    }
+    for y in 1..h.saturating_sub(1) {
+        out.push((w - 1, y, "\u{2502}"));
+    }
+    if w > 1 && h > 1 {
+        out.push((w - 1, h - 1, "\u{256F}"));
+    }
+    for x in (1..w.saturating_sub(1)).rev() {
+        out.push((x, h - 1, "\u{2500}"));
+    }
+    if h > 1 {
+        out.push((0, h - 1, "\u{2570}"));
+    }
+    for y in (1..h.saturating_sub(1)).rev() {
+        out.push((0, y, "\u{2502}"));
+    }
+    out
+}
+
+fn gradient_text_line(text: &str, stops: &[Color]) -> Line<'static> {
     let colors = blend_1d(text.chars().count().max(1), stops);
     Line::from(
         text.chars()
             .enumerate()
-            .map(|(idx, ch)| Span::styled(ch.to_string(), Style::default().fg(colors[idx]).bg(bg)))
+            .map(|(idx, ch)| Span::styled(ch.to_string(), Style::default().fg(colors[idx])))
             .collect::<Vec<_>>(),
     )
 }
 
 pub struct FinishPopup {
-    text: &'static str,
+    lines: Vec<String>,
+    failed: bool,
 }
 
 impl FinishPopup {
-    pub fn from_state(state: PopupState) -> Self {
-        match state {
-            PopupState::Finished => Self {
-                text: "Press \"q\" to quit, any key to continue",
-            },
-            PopupState::AbortConfirm => Self {
-                text: "^C again or \"y\" to abort the running farm, any key to continue",
-            },
+    pub fn from_state(state: PopupState, failed: bool, excuse: Option<&str>) -> Self {
+        let mut lines = match state {
+            PopupState::Finished => {
+                vec!["Press \"q\" to quit, any key to continue".to_string()]
+            }
+            PopupState::AbortConfirm => {
+                vec!["^C again or \"y\" to abort the running farm, any key to continue"
+                    .to_string()]
+            }
+        };
+        if let Some(excuse) = excuse {
+            lines.insert(0, format!("  {}", excuse));
         }
+        Self { lines, failed }
     }
 
     pub fn render(&self, frame: &mut Frame<'_>) {
-        let area = PopupLayout::new(frame.area(), self.width()).area();
+        let area = PopupLayout::new(frame.area(), self.width(), self.height()).area();
         frame.render_widget(Clear, area);
-        let bg = Color::Indexed(234);
-        let inner = render_gradient_rounded_panel(
-            frame.buffer_mut(),
-            area,
-            Style::default().bg(bg),
-            &[
-                Color::Indexed(205),
-                Color::Indexed(99),
-                Color::Indexed(51),
-                Color::Indexed(99),
-                Color::Indexed(205),
-            ],
+        let bg_stops: &[Color] = if self.failed {
+            &[palette::PROCESSING_BASE_DIMMED, palette::BG_2]
+        } else {
+            &[palette::BG_3, palette::BG_2]
+        };
+        let border_stops = &[
+            Color::Indexed(205),
+            Color::Indexed(99),
+            Color::Indexed(51),
+            Color::Indexed(99),
+            Color::Indexed(205),
+        ];
+        let perimeter = rounded_perimeter(area.width as usize, area.height as usize);
+        let colors = blend_1d(perimeter.len().max(1), border_stops);
+        let buf = frame.buffer_mut();
+        for (idx, (x, y, sym)) in perimeter.into_iter().enumerate() {
+            if let Some(cell) = buf.cell_mut((area.x + x, area.y + y)) {
+                cell.set_symbol(sym);
+                cell.set_fg(colors[idx]);
+            }
+        }
+        let inner = Rect::new(
+            area.x + 1,
+            area.y + 1,
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2),
         );
-        let text_line = gradient_text_line(
-            self.text,
-            &[
-                Color::Indexed(229),
-                Color::Indexed(221),
-                Color::Indexed(216),
-                Color::Indexed(210),
-                Color::Indexed(204),
-            ],
-            bg,
+        let gradient = blend_2d(
+            area.width as usize,
+            area.height as usize,
+            25.0,
+            bg_stops,
         );
-        let text_y = inner.y + inner.height / 2;
-        frame.buffer_mut().set_line(
-            inner.x + 2,
-            text_y,
-            &text_line,
-            inner.width.saturating_sub(2),
-        );
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let idx = y as usize * area.width as usize + x as usize;
+                if let Some(cell) = buf.cell_mut((area.x + x, area.y + y)) {
+                    cell.set_bg(gradient[idx]);
+                }
+            }
+        }
+        let exc_stops: &[Color] = &[
+            Color::Indexed(159),
+            Color::Indexed(153),
+            Color::Indexed(147),
+            Color::Indexed(141),
+            Color::Indexed(135),
+            Color::Indexed(129),
+        ];
+        let quit_stops: &[Color] = &[
+            Color::Indexed(229),
+            Color::Indexed(221),
+            Color::Indexed(216),
+            Color::Indexed(210),
+            Color::Indexed(204),
+        ];
+        let gaps = (inner.height as usize).saturating_sub(self.lines.len());
+        let gap_height = gaps / (self.lines.len() + 1);
+        for (i, line) in self.lines.iter().enumerate() {
+            let stops = if self.failed && i == 0 {
+                exc_stops
+            } else {
+                quit_stops
+            };
+            let text_line = gradient_text_line(line, stops);
+            let y = inner.y + gap_height as u16 + (1 + gap_height) as u16 * i as u16;
+            let text_width = line.chars().count() as u16;
+            let x = inner.x + inner.width.saturating_sub(text_width) / 2;
+            buf.set_line(x, y, &text_line, text_width);
+        }
     }
 
     fn width(&self) -> u16 {
-        self.text
-            .chars()
-            .count()
+        self.lines
+            .iter()
+            .map(|l| l.chars().count())
+            .max()
+            .unwrap_or(0)
             .saturating_add(6)
             .try_into()
             .unwrap_or(u16::MAX)
+    }
+
+    fn height(&self) -> u16 {
+        (self.lines.len() * 2 + 3) as u16
     }
 }
 
 struct PopupLayout {
     area: Rect,
     width: u16,
+    height: u16,
 }
 
 impl PopupLayout {
-    fn new(area: Rect, width: u16) -> Self {
-        Self { area, width }
+    fn new(area: Rect, width: u16, height: u16) -> Self {
+        Self { area, width, height }
     }
 
     fn area(&self) -> Rect {
-        Layout::vertical([Constraint::Length(5)])
+        Layout::vertical([Constraint::Length(self.height)])
             .flex(Flex::Center)
             .split(self.area)
             .to_vec()

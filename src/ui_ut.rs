@@ -173,6 +173,7 @@ fn build_screen_renders_finish_popup_when_requested() {
         Some(crate::app::PopupState::Finished),
         false,
         None,
+        None,
     );
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).expect("test terminal should be created");
@@ -187,7 +188,7 @@ fn build_screen_renders_finish_popup_when_requested() {
             .buffer()
             .content()
             .iter()
-            .any(|cell| cell.symbol() == "q" && cell.bg == Color::Indexed(234))
+            .any(|cell| cell.symbol() == "q")
     );
 }
 

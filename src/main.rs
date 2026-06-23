@@ -5,6 +5,7 @@ mod app;
 #[cfg(test)]
 mod app_ut;
 mod clidef;
+mod excuses;
 mod model;
 #[cfg(test)]
 mod model_ut;
