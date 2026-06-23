@@ -270,6 +270,10 @@ impl BuildCommand {
         Self::new(
             "ssh",
             vec![
+                "-o".to_string(),
+                "StrictHostKeyChecking=accept-new".to_string(),
+                "-o".to_string(),
+                "UpdateHostKeys=yes".to_string(),
                 "-tt".to_string(),
                 target.host().to_string(),
                 format!(
@@ -313,6 +317,10 @@ impl<'a> RemoteSync<'a> {
 
     fn ensure_remote_dir_args(&self) -> Vec<String> {
         vec![
+            "-o".to_string(),
+            "StrictHostKeyChecking=accept-new".to_string(),
+            "-o".to_string(),
+            "UpdateHostKeys=yes".to_string(),
             self.target.host().to_string(),
             format!("mkdir -p '{}'", self.target.remote_path()),
         ]
@@ -546,6 +554,10 @@ impl<'a> ResultMirror<'a> {
 
     fn capture_remote(host: &str, program: &str, args: &[&str]) -> Result<String, String> {
         Command::new("ssh")
+            .arg("-o")
+            .arg("StrictHostKeyChecking=accept-new")
+            .arg("-o")
+            .arg("UpdateHostKeys=yes")
             .arg(host)
             .arg(program)
             .args(args)
@@ -922,12 +934,18 @@ impl<'a> PtySession<'a> {
                 builder.args(self.command.args());
                 builder.cwd(cwd);
                 builder.env("TERM", "xterm-256color");
+                if let Ok(sock) = std::env::var("SSH_AUTH_SOCK") {
+                    builder.env("SSH_AUTH_SOCK", sock);
+                }
                 builder
             })
             .unwrap_or_else(|| {
                 let mut builder = CommandBuilder::new(self.command.program());
                 builder.args(self.command.args());
                 builder.env("TERM", "xterm-256color");
+                if let Ok(sock) = std::env::var("SSH_AUTH_SOCK") {
+                    builder.env("SSH_AUTH_SOCK", sock);
+                }
                 builder
             })
     }
