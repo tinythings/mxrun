@@ -934,12 +934,18 @@ impl<'a> PtySession<'a> {
                 builder.args(self.command.args());
                 builder.cwd(cwd);
                 builder.env("TERM", "xterm-256color");
+                if let Ok(sock) = std::env::var("SSH_AUTH_SOCK") {
+                    builder.env("SSH_AUTH_SOCK", sock);
+                }
                 builder
             })
             .unwrap_or_else(|| {
                 let mut builder = CommandBuilder::new(self.command.program());
                 builder.args(self.command.args());
                 builder.env("TERM", "xterm-256color");
+                if let Ok(sock) = std::env::var("SSH_AUTH_SOCK") {
+                    builder.env("SSH_AUTH_SOCK", sock);
+                }
                 builder
             })
     }
