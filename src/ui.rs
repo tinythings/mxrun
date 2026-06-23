@@ -33,6 +33,7 @@ impl<'a> TileLines<'a> {
 pub struct BuildScreen<'a> {
     tiles: Vec<BuildTile<'a>>,
     popup: Option<FinishPopup>,
+    label: Option<&'a str>,
 }
 
 impl<'a> BuildScreen<'a> {
@@ -41,6 +42,7 @@ impl<'a> BuildScreen<'a> {
         Self {
             tiles: plan.jobs().iter().map(BuildTile::from_job).collect(),
             popup: None,
+            label: None,
         }
     }
 
@@ -50,6 +52,7 @@ impl<'a> BuildScreen<'a> {
         scrollbacks: &[usize],
         popup: Option<PopupState>,
         wrap_lines: bool,
+        label: Option<&'a str>,
     ) -> Self {
         Self {
             tiles: states
@@ -65,6 +68,7 @@ impl<'a> BuildScreen<'a> {
                 })
                 .collect(),
             popup: popup.map(FinishPopup::from_state),
+            label,
         }
     }
 
@@ -74,7 +78,32 @@ impl<'a> BuildScreen<'a> {
             .iter()
             .zip(self.tiles.iter())
             .for_each(|(area, tile)| tile.render(frame, *area));
+        self.render_label(frame);
         self.popup.iter().for_each(|popup| popup.render(frame));
+    }
+
+    fn render_label(&self, frame: &mut Frame<'_>) {
+        if let Some(label) = self.label {
+            let area = frame.area();
+            let any_failed = self
+                .tiles
+                .iter()
+                .any(|t| matches!(t.status.stage(), JobStage::Failed));
+            let fg = if any_failed {
+                palette::FG
+            } else {
+                palette::WARNING_HEAT
+            };
+            let styled_label = format!(" {} ", label);
+            let label_width = styled_label.len() as u16;
+            let x = area.x + area.width.saturating_sub(label_width + 3);
+            frame.buffer_mut().set_line(
+                x,
+                area.y,
+                &Line::from(Span::styled(styled_label, Style::default().fg(fg))),
+                label_width,
+            );
+        }
     }
 
     pub fn viewport_height(count: usize, active_pane: usize, area: Rect) -> usize {

@@ -55,6 +55,7 @@ struct RunOptions {
     mirror_results: bool,
     mirror_root: PathBuf,
     wrap_lines: bool,
+    label: Option<String>,
 }
 
 impl Command {
@@ -82,6 +83,7 @@ impl Command {
         MxrunApp::new(
             BuildPlan::init(&ConfigFile::load(), &RepoRoot::path()),
             false,
+            None,
         )
         .run()
         .unwrap_or_else(|err| Fatal::raise(&err))
@@ -100,6 +102,7 @@ impl Command {
                 options.mirror_plan(),
             ),
             options.wrap_lines(),
+            options.label(),
         )
         .run()
         .unwrap_or_else(|err| Fatal::raise(&err))
@@ -150,6 +153,7 @@ impl RunOptions {
             mirror_results,
             mirror_root: mirror_root.unwrap_or_else(Self::default_mirror_root),
             wrap_lines: clidef::wrap_lines(am),
+            label: clidef::label(am),
         }
     }
 
@@ -171,6 +175,10 @@ impl RunOptions {
 
     fn wrap_lines(&self) -> bool {
         self.wrap_lines
+    }
+
+    fn label(&self) -> Option<&str> {
+        self.label.as_deref()
     }
 
     fn announce_mirroring_contract(&self) {

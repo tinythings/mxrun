@@ -28,14 +28,16 @@ pub struct MxrunApp {
     plan: BuildPlan,
     states: Vec<JobState>,
     wrap_lines: bool,
+    label: Option<String>,
 }
 
 impl MxrunApp {
-    pub fn new(plan: BuildPlan, wrap_lines: bool) -> Self {
+    pub fn new(plan: BuildPlan, wrap_lines: bool, label: Option<&str>) -> Self {
         Self {
             states: plan.jobs().iter().map(JobState::from_job).collect(),
             plan,
             wrap_lines,
+            label: label.map(String::from),
         }
     }
 
@@ -49,6 +51,7 @@ impl MxrunApp {
                         keys,
                         terminal.terminal_mut(),
                         self.wrap_lines,
+                        self.label.as_deref(),
                     )
                     .run()
                 })
@@ -67,6 +70,7 @@ struct AppLoop<'a> {
     popup: Option<PopupState>,
     popup_dismissed: bool,
     wrap_lines: bool,
+    label: Option<String>,
     last_load_update: Instant,
 }
 
@@ -77,6 +81,7 @@ impl<'a> AppLoop<'a> {
         keys: Receiver<KeyPress>,
         terminal: &'a mut Terminal<CrosstermBackend<std::io::Stdout>>,
         wrap_lines: bool,
+        label: Option<&str>,
     ) -> Self {
         let pane_count = states.len();
 
@@ -90,6 +95,7 @@ impl<'a> AppLoop<'a> {
             popup: None,
             popup_dismissed: false,
             wrap_lines,
+            label: label.map(String::from),
             last_load_update: Instant::now(),
         }
     }
@@ -148,6 +154,7 @@ impl<'a> AppLoop<'a> {
                     &self.scrollbacks,
                     self.popup,
                     self.wrap_lines,
+                    self.label.as_deref(),
                 )
                 .render(frame)
             })

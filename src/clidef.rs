@@ -49,6 +49,12 @@ pub fn cli() -> Command {
                         .long("wrap-lines")
                         .action(ArgAction::SetTrue)
                         .help("Wrap log lines in the viewport instead of trimming them with ..."),
+                )
+                .arg(
+                    Arg::new("label")
+                        .long("label")
+                        .value_name("TEXT")
+                        .help("Show a label in the top-right corner of the build screen"),
                 ),
         )
         .next_help_heading("Other")
@@ -101,6 +107,12 @@ pub fn wrap_lines(am: &ArgMatches) -> bool {
         .and_then(|sub| sub.get_one::<bool>("wrap-lines"))
         .copied()
         .unwrap_or(false)
+}
+
+pub fn label(am: &ArgMatches) -> Option<String> {
+    am.subcommand_matches("run")
+        .and_then(|sub| sub.get_one::<String>("label"))
+        .cloned()
 }
 
 pub fn add_host(am: &ArgMatches) -> Option<String> {

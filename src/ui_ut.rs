@@ -172,6 +172,7 @@ fn build_screen_renders_finish_popup_when_requested() {
         &[0, 0],
         Some(crate::app::PopupState::Finished),
         false,
+        None,
     );
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).expect("test terminal should be created");
