@@ -37,6 +37,7 @@ pub struct BuildScreen<'a> {
     tiles: Vec<BuildTile<'a>>,
     popup: Option<FinishPopup>,
     label: Option<&'a str>,
+    active_pane: usize,
 }
 
 impl<'a> BuildScreen<'a> {
@@ -46,12 +47,13 @@ impl<'a> BuildScreen<'a> {
             tiles: plan.jobs().iter().map(BuildTile::from_job).collect(),
             popup: None,
             label: None,
+            active_pane: 0,
         }
     }
 
     pub fn from_states(
         states: &'a [JobState],
-        _active_pane: usize,
+        active_pane: usize,
         scrollbacks: &[usize],
         popup: Option<PopupState>,
         wrap_lines: bool,
@@ -64,15 +66,12 @@ impl<'a> BuildScreen<'a> {
                 .iter()
                 .enumerate()
                 .map(|(index, state)| {
-                    BuildTile::from_state(
-                        state,
-                        *scrollbacks.get(index).unwrap_or(&0),
-                        wrap_lines,
-                    )
+                    BuildTile::from_state(state, *scrollbacks.get(index).unwrap_or(&0), wrap_lines)
                 })
                 .collect(),
             popup: popup.map(|p| FinishPopup::from_state(p, any_failed, excuse)),
             label,
+            active_pane,
         }
     }
 
@@ -81,7 +80,8 @@ impl<'a> BuildScreen<'a> {
             .split(frame.area())
             .iter()
             .zip(self.tiles.iter())
-            .for_each(|(area, tile)| tile.render(frame, *area));
+            .enumerate()
+            .for_each(|(index, (area, tile))| tile.render(frame, *area, index == self.active_pane));
         self.render_label(frame);
         self.popup.iter().for_each(|popup| popup.render(frame));
     }
@@ -138,18 +138,14 @@ impl<'a> BuildTile<'a> {
         }
     }
 
-    pub fn from_state(
-        state: &'a JobState,
-        scrollback: usize,
-        wrap_lines: bool,
-    ) -> Self {
+    pub fn from_state(state: &'a JobState, scrollback: usize, wrap_lines: bool) -> Self {
         Self {
             status: TileStatus::from_state(state),
             viewport: TileViewport::from_lines(state.log_lines(), scrollback, wrap_lines),
         }
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, active: bool) {
         frame.render_widget(Clear, area);
         let stops: &[Color] = if matches!(self.status.stage(), JobStage::Failed) {
             &[palette::ERROR]
@@ -166,6 +162,24 @@ impl<'a> BuildTile<'a> {
             render_gradient_rounded_panel(frame.buffer_mut(), area, Style::default(), stops);
         self.viewport.render_content(frame, inner);
         self.status.render_title(frame, area);
+        if active {
+            let label = Paragraph::new(Line::from(vec![
+                Span::styled(" active ", Style::default().fg(palette::PRIMARY)),
+                Span::styled(
+                    "(\"h\" for help) ",
+                    Style::default().fg(palette::PROCESSING_GLOW),
+                ),
+            ]));
+            frame.render_widget(
+                label,
+                Rect::new(
+                    area.x + 2,
+                    area.y,
+                    (area.width.saturating_sub(2)).min(30),
+                    1,
+                ),
+            );
+        }
     }
 
     #[cfg(test)]
@@ -744,26 +758,109 @@ fn gradient_text_line(text: &str, stops: &[Color]) -> Line<'static> {
     )
 }
 
+enum PopupContent {
+    Text(Vec<String>),
+    Styled(Vec<Line<'static>>),
+}
+
+impl PopupContent {
+    fn lines(&self) -> usize {
+        match self {
+            PopupContent::Text(v) => v.len(),
+            PopupContent::Styled(v) => v.len(),
+        }
+    }
+
+    fn max_width(&self) -> usize {
+        match self {
+            PopupContent::Text(v) => v.iter().map(|l| l.chars().count()).max().unwrap_or(0),
+            PopupContent::Styled(v) => v.iter().map(|l| l.width()).max().unwrap_or(0),
+        }
+    }
+}
+
 pub struct FinishPopup {
-    lines: Vec<String>,
+    content: PopupContent,
     failed: bool,
 }
 
 impl FinishPopup {
     pub fn from_state(state: PopupState, failed: bool, excuse: Option<&str>) -> Self {
-        let mut lines = match state {
-            PopupState::Finished => {
-                vec!["Press \"q\" to quit, any key to continue".to_string()]
+        match state {
+            PopupState::Help => {
+                let title_stops: &[Color] = &[
+                    Color::Indexed(159),
+                    Color::Indexed(153),
+                    Color::Indexed(147),
+                    Color::Indexed(141),
+                    Color::Indexed(135),
+                    Color::Indexed(129),
+                ];
+                let title_text = format!("mxrun: remote builder, version {}", crate::VERSION);
+                let title_colors = blend_1d(title_text.chars().count().max(1), title_stops);
+                let title = Line::from(
+                    title_text
+                        .chars()
+                        .enumerate()
+                        .map(|(idx, ch)| {
+                            Span::styled(
+                                ch.to_string(),
+                                Style::default()
+                                    .fg(title_colors[idx])
+                                    .add_modifier(ratatui::style::Modifier::BOLD),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                );
+                let spacer = Line::from(Span::raw(""));
+                let mk = |key: &str, desc: &str| {
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{:22}", key),
+                            Style::default()
+                                .fg(palette::WARNING)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                        Span::styled(desc.to_string(), Style::default().fg(palette::SUCCESS_PEAK)),
+                    ])
+                };
+                let help_lines = vec![
+                    mk("  Tab / Shift+Tab", "next / previous pane"),
+                    mk("  ↑ ↓", "scroll line up / down"),
+                    mk("  Page Up/Down", "scroll page up / down"),
+                    mk("  Home / End", "jump to top / bottom"),
+                    mk("  h", "toggle this help"),
+                    mk("  Esc", "close help"),
+                    mk("  q or ^C", "abort / quit"),
+                ];
+                let lines: Vec<Line> = [title, spacer].into_iter().chain(help_lines).collect();
+                Self {
+                    content: PopupContent::Styled(lines),
+                    failed,
+                }
             }
-            PopupState::AbortConfirm => {
-                vec!["^C again or \"y\" to abort the running farm, any key to continue"
-                    .to_string()]
+            _ => {
+                let mut lines = match state {
+                    PopupState::Finished => {
+                        vec!["Press \"q\" to quit, any key to continue".to_string()]
+                    }
+                    PopupState::AbortConfirm => {
+                        vec![
+                            "^C again or \"y\" to abort the running farm, any key to continue"
+                                .to_string(),
+                        ]
+                    }
+                    _ => unreachable!(),
+                };
+                if let Some(excuse) = excuse {
+                    lines.insert(0, format!("  {}", excuse));
+                }
+                Self {
+                    content: PopupContent::Text(lines),
+                    failed,
+                }
             }
-        };
-        if let Some(excuse) = excuse {
-            lines.insert(0, format!("  {}", excuse));
         }
-        Self { lines, failed }
     }
 
     pub fn render(&self, frame: &mut Frame<'_>) {
@@ -796,12 +893,7 @@ impl FinishPopup {
             area.width.saturating_sub(2),
             area.height.saturating_sub(2),
         );
-        let gradient = blend_2d(
-            area.width as usize,
-            area.height as usize,
-            25.0,
-            bg_stops,
-        );
+        let gradient = blend_2d(area.width as usize, area.height as usize, 25.0, bg_stops);
         for y in 0..area.height {
             for x in 0..area.width {
                 let idx = y as usize * area.width as usize + x as usize;
@@ -825,35 +917,53 @@ impl FinishPopup {
             Color::Indexed(210),
             Color::Indexed(204),
         ];
-        let gaps = (inner.height as usize).saturating_sub(self.lines.len());
-        let gap_height = gaps / (self.lines.len() + 1);
-        for (i, line) in self.lines.iter().enumerate() {
-            let stops = if self.failed && i == 0 {
-                exc_stops
-            } else {
-                quit_stops
-            };
-            let text_line = gradient_text_line(line, stops);
-            let y = inner.y + gap_height as u16 + (1 + gap_height) as u16 * i as u16;
-            let text_width = line.chars().count() as u16;
-            let x = inner.x + inner.width.saturating_sub(text_width) / 2;
-            buf.set_line(x, y, &text_line, text_width);
+        let gaps = (inner.height as usize).saturating_sub(self.content.lines());
+        let gap_height = gaps / (self.content.lines() + 1);
+        match &self.content {
+            PopupContent::Text(lines) => {
+                for (i, line) in lines.iter().enumerate() {
+                    let stops = if self.failed && i == 0 {
+                        exc_stops
+                    } else {
+                        quit_stops
+                    };
+                    let text_line = gradient_text_line(line, stops);
+                    let y = inner.y + gap_height as u16 + (1 + gap_height) as u16 * i as u16;
+                    let text_width = line.chars().count() as u16;
+                    let x = inner.x + inner.width.saturating_sub(text_width) / 2;
+                    buf.set_line(x, y, &text_line, text_width);
+                }
+            }
+            PopupContent::Styled(lines) => {
+                let max_w = lines.iter().map(|l| l.width() as u16).max().unwrap_or(0);
+                let block_x = inner.x + inner.width.saturating_sub(max_w) / 2;
+                for (i, line) in lines.iter().enumerate() {
+                    let y = inner.y + 1 + i as u16;
+                    let line_w = line.width() as u16;
+                    let x = if i == 0 {
+                        inner.x + inner.width.saturating_sub(line_w) / 2
+                    } else {
+                        block_x
+                    };
+                    buf.set_line(x, y, line, line_w);
+                }
+            }
         }
     }
 
     fn width(&self) -> u16 {
-        self.lines
-            .iter()
-            .map(|l| l.chars().count())
-            .max()
-            .unwrap_or(0)
+        self.content
+            .max_width()
             .saturating_add(6)
             .try_into()
             .unwrap_or(u16::MAX)
     }
 
     fn height(&self) -> u16 {
-        (self.lines.len() * 2 + 3) as u16
+        match &self.content {
+            PopupContent::Text(_) => (self.content.lines() * 2 + 3) as u16,
+            PopupContent::Styled(_) => (self.content.lines() + 4) as u16,
+        }
     }
 }
 
@@ -865,7 +975,11 @@ struct PopupLayout {
 
 impl PopupLayout {
     fn new(area: Rect, width: u16, height: u16) -> Self {
-        Self { area, width, height }
+        Self {
+            area,
+            width,
+            height,
+        }
     }
 
     fn area(&self) -> Rect {
