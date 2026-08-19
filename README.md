@@ -52,17 +52,27 @@ mxrun -a 203.0.113.10
 
 ## Config format
 
-```text
-local
-FreeBSD amd64 builder@freebsd-vm:work/example-mxrun
-GNU/Linux x86_64 builder@linux-vm:work/example-mxrun
+```yaml
+targets:
+  - local
+  - FreeBSD amd64 builder@freebsd-vm:work/example-mxrun
+  - GNU/Linux x86_64 builder@linux-vm:work/example-mxrun
+
+project:
+  ignore:
+    - /generated/
+    - '*.cache'
 ```
 
-If the config file does not exist yet, mxrun creates it with:
+`project.ignore` entries are passed to `rsync` as exclusion patterns. They can name files, directories, or globs; `/` anchors a pattern at the project root. Existing remote files are not deleted.
+
+Legacy target-only configs remain supported:
 
 ```text
 local
 ```
+
+If the config file does not exist yet, mxrun creates the YAML form with a local target and an empty ignore list.
 
 ## Producer contract
 
