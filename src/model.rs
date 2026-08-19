@@ -124,6 +124,92 @@ pub struct ResultMirrorPlan {
     manifest: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildOutputPlan {
+    sources: Vec<PathBuf>,
+    files: Option<Vec<PathBuf>>,
+    destination: PathBuf,
+}
+
+impl BuildOutputPlan {
+    fn new(
+        sources: Vec<String>,
+        files: Option<Vec<String>>,
+        destination: String,
+    ) -> Result<Self, String> {
+        let sources = Self::relative_paths(sources, "source")?;
+        let files = files
+            .map(|files| Self::relative_paths(files, "file"))
+            .transpose()?;
+        let destination = PathBuf::from(destination);
+
+        if sources.is_empty() {
+            return Err("invalid project build: src must contain at least one path".to_string());
+        }
+        if destination.as_os_str().is_empty() {
+            return Err("invalid project build: dst must not be empty".to_string());
+        }
+        if !destination.is_absolute()
+            && sources.iter().any(|source| destination.starts_with(source))
+        {
+            return Err(
+                "invalid project build: dst must not be inside a configured src path".to_string(),
+            );
+        }
+
+        Ok(Self {
+            sources,
+            files,
+            destination,
+        })
+    }
+
+    pub fn sources(&self) -> &[PathBuf] {
+        &self.sources
+    }
+
+    pub fn destination(&self) -> &Path {
+        &self.destination
+    }
+
+    pub fn files(&self) -> &[PathBuf] {
+        self.files.as_deref().unwrap_or_default()
+    }
+
+    pub fn selects_files(&self) -> bool {
+        self.files.is_some()
+    }
+
+    fn relative_paths(paths: Vec<String>, kind: &str) -> Result<Vec<PathBuf>, String> {
+        paths
+            .into_iter()
+            .map(PathBuf::from)
+            .map(|path| {
+                if Self::is_workspace_path(&path) {
+                    Ok(path)
+                } else {
+                    Err(format!(
+                        "invalid project build {kind} '{}': expected a non-empty relative path without '..'",
+                        path.display()
+                    ))
+                }
+            })
+            .collect()
+    }
+
+    fn is_workspace_path(path: &Path) -> bool {
+        !path.as_os_str().is_empty()
+            && !path.is_absolute()
+            && path.file_name().is_some()
+            && !path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::RootDir
+                )
+            })
+    }
+}
+
 impl ResultMirrorPlan {
     pub fn new(enabled: bool, root: PathBuf, entry: &str) -> Self {
         Self {
@@ -161,6 +247,7 @@ impl ResultMirrorPlan {
 pub struct MxrunConfig {
     targets: Vec<BuildTarget>,
     ignores: Vec<String>,
+    build_output: Option<BuildOutputPlan>,
 }
 
 impl MxrunConfig {
@@ -186,11 +273,16 @@ impl MxrunConfig {
         &self.ignores
     }
 
+    pub fn build_output(&self) -> Option<&BuildOutputPlan> {
+        self.build_output.as_ref()
+    }
+
     fn from_legacy_lines(targets: Vec<BuildTarget>) -> Result<Self, String> {
         (!targets.is_empty())
             .then_some(Self {
                 targets,
                 ignores: vec![],
+                build_output: None,
             })
             .ok_or_else(|| "mxrun config has no targets".to_string())
     }
@@ -212,10 +304,17 @@ impl MxrunConfig {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        let build_output = config
+            .project
+            .build
+            .map(|build| BuildOutputPlan::new(build.src, build.files, build.dst))
+            .transpose()?;
+
         (!targets.is_empty())
             .then_some(Self {
                 targets,
                 ignores: config.project.ignore,
+                build_output,
             })
             .ok_or_else(|| "mxrun config has no targets".to_string())
     }
@@ -236,19 +335,47 @@ struct YamlConfig {
 
 #[derive(Default, Deserialize)]
 struct ProjectConfig {
-    #[serde(default, deserialize_with = "deserialize_ignore_patterns")]
+    #[serde(default, deserialize_with = "deserialize_string_list")]
     ignore: Vec<String>,
+    build: Option<YamlBuildOutput>,
 }
 
-fn deserialize_ignore_patterns<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+#[derive(Deserialize)]
+struct YamlBuildOutput {
+    #[serde(deserialize_with = "deserialize_string_list")]
+    src: Vec<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string_list")]
+    files: Option<Vec<String>>,
+    dst: String,
+}
+
+fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    Vec::<serde_yaml::Value>::deserialize(deserializer)?
+    string_values(Vec::<serde_yaml::Value>::deserialize(deserializer)?)
+}
+
+fn deserialize_optional_string_list<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<Vec<serde_yaml::Value>>::deserialize(deserializer)?
+        .map(string_values)
+        .transpose()
+}
+
+fn string_values<E>(values: Vec<serde_yaml::Value>) -> Result<Vec<String>, E>
+where
+    E: Error,
+{
+    values
         .into_iter()
         .map(|value| match value {
             serde_yaml::Value::String(pattern) => Ok(pattern),
-            _ => Err(D::Error::custom("ignore patterns must be strings")),
+            _ => Err(E::custom("entries must be strings")),
         })
         .collect()
 }

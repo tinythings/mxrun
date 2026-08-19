@@ -58,6 +58,69 @@ fn parse_yaml_rejects_non_string_ignore_patterns() {
 }
 
 #[test]
+fn parse_accepts_project_build_output() {
+    let cfg = MxrunConfig::parse(
+        "targets:\n  - local\nproject:\n  build:\n    src:\n      - target/debug/example\n      - build/output\n    files:\n      - example\n    dst: target/platforms\n",
+    )
+    .expect("build output config should parse");
+    let output = cfg
+        .build_output()
+        .expect("build output should be configured");
+
+    assert_eq!(
+        output.sources(),
+        [Path::new("target/debug/example"), Path::new("build/output")]
+    );
+    assert_eq!(output.files(), [Path::new("example")]);
+    assert!(output.selects_files());
+    assert_eq!(output.destination(), Path::new("target/platforms"));
+}
+
+#[test]
+fn parse_rejects_unsafe_project_build_source() {
+    let err = MxrunConfig::parse(
+        "targets:\n  - local\nproject:\n  build:\n    src:\n      - ../outside\n    dst: target/platforms\n",
+    )
+    .expect_err("source paths must remain in the workspace");
+
+    assert!(err.contains("expected a non-empty relative path without '..'"));
+}
+
+#[test]
+fn parse_rejects_project_build_destination_inside_source() {
+    let err = MxrunConfig::parse(
+        "targets:\n  - local\nproject:\n  build:\n    src:\n      - target\n    dst: target/platforms\n",
+    )
+    .expect_err("destination must not recursively copy into a source");
+
+    assert!(err.contains("dst must not be inside a configured src path"));
+}
+
+#[test]
+fn parse_rejects_unsafe_project_build_file_selector() {
+    let err = MxrunConfig::parse(
+        "targets:\n  - local\nproject:\n  build:\n    src:\n      - target/debug\n    files:\n      - ../outside\n    dst: target/platforms\n",
+    )
+    .expect_err("file selectors must remain in their source directory");
+
+    assert!(err.contains("invalid project build file"));
+}
+
+#[test]
+fn parse_treats_an_empty_file_selector_as_defined() {
+    let cfg = MxrunConfig::parse(
+        "targets:\n  - local\nproject:\n  build:\n    src:\n      - target/debug\n    files: []\n    dst: target/platforms\n",
+    )
+    .expect("build output config should parse");
+
+    assert!(
+        cfg.build_output()
+            .expect("build output should be configured")
+            .selects_files()
+    );
+}
+
+#[test]
 fn parse_rejects_bad_field_count() {
     let err = MxrunConfig::parse("FreeBSD amd64\n").expect_err("bad field count must fail");
 

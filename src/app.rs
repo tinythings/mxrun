@@ -521,7 +521,10 @@ impl JobWorker {
                     })
                     .and_then(|status| {
                         if status == 0 {
-                            self.job.run_mirror().map(|_| status)
+                            self.job
+                                .collect_build_output()
+                                .and_then(|_| self.job.run_mirror())
+                                .map(|_| status)
                         } else {
                             Ok(status)
                         }
