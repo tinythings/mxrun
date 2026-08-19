@@ -26,28 +26,47 @@ That is the whole workflow. The rest of the documentation explains what the conf
 
 ## The target config file
 
-The target config file is plain text. Each line describes one build target. The format is:
+The target config file is YAML. Targets retain their compact existing format:
+
+```yaml
+targets:
+  - local
+  - FreeBSD amd64 builder@freebsd-vm:work/example-mxrun
+  - GNU/Linux x86_64 builder@linux-vm:work/example-mxrun
+
+project:
+  ignore:
+    - /generated/
+    - '*.cache'
+```
+
+Each remote target entry has this form:
 
 ```text
 <uname -o> <uname -m> [user@]host:/destination
-```
-
-Here is a small example:
-
-```text
-local
-FreeBSD amd64 builder@freebsd-vm:work/example-mxrun
-GNU/Linux x86_64 builder@linux-vm:work/example-mxrun
 ```
 
 The special word `local` means that the current machine should also participate in the run. The other lines describe remote machines. For example, the FreeBSD line says that the project should be synchronized to `builder@freebsd-vm:work/example-mxrun` and built there.
 
 This means that one `mxrun` run can cover the local machine and one or more remote systems with the same build entry.
 
-If `MXRUN_CONFIG` or `--config` points to a file that does not exist yet, `mxrun` creates it automatically with a single line:
+`project.ignore` contains `rsync` exclusion patterns. Entries may name a file, directory, or glob. A leading `/` anchors the pattern at the project root. The syntax is gitignore-like but uses rsync matching rules, and an exclusion does not remove files already present on a remote target. Unknown `project` keys are accepted for future options.
+
+Existing target-only config files remain valid:
 
 ```text
 local
+FreeBSD amd64 builder@freebsd-vm:work/example-mxrun
+```
+
+If `MXRUN_CONFIG` or `--config` points to a file that does not exist yet, `mxrun` creates it automatically with a local target and no exclusions:
+
+```yaml
+targets:
+  - local
+
+project:
+  ignore: []
 ```
 
 That lets a first run start with a local-only config instead of aborting on a missing file.
@@ -146,9 +165,13 @@ devel:
 
 With that Makefile in place, a matching `mxrun.conf` could look like this:
 
-```text
-local
-FreeBSD amd64 builder@freebsd-vm:work/hello-mxrun
+```yaml
+targets:
+  - local
+  - FreeBSD amd64 builder@freebsd-vm:work/hello-mxrun
+
+project:
+  ignore: []
 ```
 
 Now a full run becomes:

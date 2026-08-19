@@ -39,6 +39,25 @@ fn parse_keeps_comments_and_blank_lines_ignored() {
 }
 
 #[test]
+fn parse_accepts_yaml_targets_and_project_ignores() {
+    let cfg = MxrunConfig::parse(
+        "targets:\n  - local\n  - FreeBSD amd64 builder@freebsd-vm:work/demo\n\nproject:\n  ignore:\n    - /generated/\n    - '*.cache'\n  in-a-future:\n    other: option\n",
+    )
+    .expect("YAML config should parse");
+
+    assert_eq!(cfg.targets().len(), 2);
+    assert_eq!(cfg.ignores(), ["/generated/", "*.cache"]);
+}
+
+#[test]
+fn parse_yaml_rejects_non_string_ignore_patterns() {
+    let err = MxrunConfig::parse("targets:\n  - local\nproject:\n  ignore:\n    - 1\n")
+        .expect_err("ignore patterns must be strings");
+
+    assert!(err.contains("invalid YAML mxrun config"));
+}
+
+#[test]
 fn parse_rejects_bad_field_count() {
     let err = MxrunConfig::parse("FreeBSD amd64\n").expect_err("bad field count must fail");
 

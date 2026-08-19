@@ -27,7 +27,15 @@ impl BuildPlan {
                 .targets()
                 .iter()
                 .map(|target| {
-                    BuildJob::build(target, entry, root_dir, log_root, local_make, &mirror_plan)
+                    BuildJob::build_with_ignores(
+                        target,
+                        entry,
+                        root_dir,
+                        log_root,
+                        local_make,
+                        &mirror_plan,
+                        config.ignores(),
+                    )
                 })
                 .collect(),
         }
@@ -54,6 +62,7 @@ pub struct BuildJob {
     log_path: PathBuf,
     root_dir: PathBuf,
     mirror_plan: ResultMirrorPlan,
+    ignores: Vec<String>,
     mode: RunMode,
 }
 
@@ -71,6 +80,7 @@ impl Clone for BuildJob {
             log_path: self.log_path.clone(),
             root_dir: self.root_dir.clone(),
             mirror_plan: self.mirror_plan.clone(),
+            ignores: self.ignores.clone(),
             mode: self.mode,
         }
     }
@@ -91,10 +101,12 @@ impl BuildJob {
             log_path,
             root_dir,
             mirror_plan,
+            ignores: vec![],
             mode,
         }
     }
 
+    #[cfg(test)]
     pub fn build(
         target: &BuildTarget,
         entry: &str,
@@ -102,6 +114,26 @@ impl BuildJob {
         log_root: &Path,
         local_make: &str,
         mirror_plan: &ResultMirrorPlan,
+    ) -> Self {
+        Self::build_with_ignores(
+            target,
+            entry,
+            root_dir,
+            log_root,
+            local_make,
+            mirror_plan,
+            &[],
+        )
+    }
+
+    fn build_with_ignores(
+        target: &BuildTarget,
+        entry: &str,
+        root_dir: &Path,
+        log_root: &Path,
+        local_make: &str,
+        mirror_plan: &ResultMirrorPlan,
+        ignores: &[String],
     ) -> Self {
         Self::new(
             target.clone(),
@@ -111,6 +143,12 @@ impl BuildJob {
             mirror_plan.clone(),
             RunMode::Run,
         )
+        .with_ignores(ignores)
+    }
+
+    fn with_ignores(mut self, ignores: &[String]) -> Self {
+        self.ignores = ignores.to_vec();
+        self
     }
 
     pub fn target(&self) -> &BuildTarget {
@@ -179,7 +217,7 @@ impl BuildJob {
         if self.target.is_local() {
             Ok(())
         } else {
-            RemoteSync::new(&self.root_dir, &self.target).run(&self.log_path)
+            RemoteSync::new(&self.root_dir, &self.target, &self.ignores).run(&self.log_path)
         }
     }
 
@@ -291,11 +329,16 @@ impl BuildCommand {
 struct RemoteSync<'a> {
     root_dir: &'a Path,
     target: &'a BuildTarget,
+    ignores: &'a [String],
 }
 
 impl<'a> RemoteSync<'a> {
-    fn new(root_dir: &'a Path, target: &'a BuildTarget) -> Self {
-        Self { root_dir, target }
+    fn new(root_dir: &'a Path, target: &'a BuildTarget, ignores: &'a [String]) -> Self {
+        Self {
+            root_dir,
+            target,
+            ignores,
+        }
     }
 
     fn run(&self, log_path: &Path) -> Result<(), String> {
@@ -327,27 +370,35 @@ impl<'a> RemoteSync<'a> {
     }
 
     fn rsync_args(&self) -> Vec<String> {
-        vec![
-            "-az".to_string(),
-            "--exclude".to_string(),
-            ".git".to_string(),
-            "--exclude".to_string(),
-            ".github".to_string(),
-            "--exclude".to_string(),
-            ".vscode".to_string(),
-            "--exclude".to_string(),
-            ".idea".to_string(),
-            "--exclude".to_string(),
-            ".mxrun".to_string(),
-            "--exclude".to_string(),
-            "target".to_string(),
-            "--exclude".to_string(),
-            "build/stage".to_string(),
-            "--exclude".to_string(),
-            "build/modules-dist".to_string(),
-            format!("{}/", self.root_dir.display()),
-            format!("{}:{}/", self.target.host(), self.target.remote_path()),
-        ]
+        let mut args = vec!["-az".to_string()];
+        let mut excludes = vec![
+            ".git",
+            ".github",
+            ".vscode",
+            ".idea",
+            ".mxrun",
+            "target",
+            "build/stage",
+            "build/modules-dist",
+        ];
+        for pattern in self.ignores.iter().map(String::as_str) {
+            if !excludes.contains(&pattern) {
+                excludes.push(pattern);
+            }
+        }
+
+        for pattern in excludes {
+            args.push("--exclude".to_string());
+            args.push(pattern.to_string());
+        }
+
+        args.push(format!("{}/", self.root_dir.display()));
+        args.push(format!(
+            "{}:{}/",
+            self.target.host(),
+            self.target.remote_path()
+        ));
+        args
     }
 
     fn command(&self, program: &str, args: Vec<String>) -> LoggedCommand {
@@ -988,5 +1039,39 @@ impl LogCapture {
         self.thread
             .join()
             .map_err(|_| "mxrun: PTY log capture thread panicked".to_string())?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crate::model::BuildTarget;
+
+    use super::RemoteSync;
+
+    #[test]
+    fn rsync_args_include_configured_ignores_once() {
+        let ignores = vec![
+            "/generated/".to_string(),
+            "target".to_string(),
+            "*.cache".to_string(),
+        ];
+        let target = BuildTarget::remote("GNU/Linux", "x86_64", "builder:work/demo");
+        let args = RemoteSync::new(Path::new("/tmp/demo"), &target, &ignores).rsync_args();
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--exclude", "/generated/"])
+        );
+        assert!(args.windows(2).any(|pair| pair == ["--exclude", "*.cache"]));
+        assert_eq!(
+            args.windows(2)
+                .filter(|pair| *pair == ["--exclude", "target"])
+                .count(),
+            1
+        );
+        assert_eq!(args[args.len() - 2], "/tmp/demo/");
+        assert_eq!(args[args.len() - 1], "builder:work/demo/");
     }
 }
