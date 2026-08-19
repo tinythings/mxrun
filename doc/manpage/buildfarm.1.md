@@ -35,6 +35,10 @@ project:
   ignore:
     - /generated/
     - '*.cache'
+  build:
+    src:
+      - target/debug/example
+    dst: target/platforms
 ```
 
 Each remote target entry has this form:
@@ -46,6 +50,24 @@ Each remote target entry has this form:
 The special value `local` means that the current machine should also take part in the run.
 
 `project.ignore` entries are passed to `rsync` as exclusion patterns. They can name files, directories, or globs; a leading `/` anchors a pattern at the project root. They use rsync matching semantics and do not remove files already on remote targets. Unknown `project` keys are reserved for future options.
+
+## project.build
+
+Collect configured build outputs after a target succeeds:
+
+```yaml
+project:
+  build:
+    src:
+      - target/debug/example
+    dst: target/platforms
+```
+
+Sources are relative to the target workspace. mxrun copies them to `<dst>/<platform>-<arch>/`, preserving normal `rsync` source-to-directory behavior. Failed targets do not produce collected output.
+
+Set `files` to select paths from directory sources instead of copying those directories recursively. The selected paths are relative to each source directory. Direct file sources are copied normally.
+
+Missing sources and selected files are logged as skipped. Existing paths that fail to transfer make collection fail for that target.
 
 Legacy target-only configs remain supported.
 

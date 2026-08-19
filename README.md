@@ -62,9 +62,31 @@ project:
   ignore:
     - /generated/
     - '*.cache'
+  build:
+    src:
+      - target/debug/example
+    dst: target/platforms
 ```
 
 `project.ignore` entries are passed to `rsync` as exclusion patterns. They can name files, directories, or globs; `/` anchors a pattern at the project root. Existing remote files are not deleted.
+
+`project.build` collects each listed workspace-relative path after a target succeeds. Results go to `<dst>/<platform>-<arch>/`, preserving normal `rsync` source-to-directory behavior. For example, `target/debug/example` is collected as `target/platforms/GNU_Linux-x86_64/example`.
+
+Set `project.build.files` to copy only selected files from directory sources. The file paths are relative to each directory source; direct file sources are always copied normally.
+
+```yaml
+project:
+  build:
+    src:
+      - target/debug
+      - target/release
+      - target/release/helper
+    files:
+      - app
+    dst: target/platforms
+```
+
+This copies `target/debug/app` to `target/platforms/<platform>-<arch>/debug/app`, while `target/release/helper` is copied directly.
 
 Legacy target-only configs remain supported:
 

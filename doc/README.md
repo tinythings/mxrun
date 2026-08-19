@@ -38,6 +38,10 @@ project:
   ignore:
     - /generated/
     - '*.cache'
+  build:
+    src:
+      - target/debug/example
+    dst: target/platforms
 ```
 
 Each remote target entry has this form:
@@ -51,6 +55,23 @@ The special word `local` means that the current machine should also participate 
 This means that one `mxrun` run can cover the local machine and one or more remote systems with the same build entry.
 
 `project.ignore` contains `rsync` exclusion patterns. Entries may name a file, directory, or glob. A leading `/` anchors the pattern at the project root. The syntax is gitignore-like but uses rsync matching rules, and an exclusion does not remove files already present on a remote target. Unknown `project` keys are accepted for future options.
+
+`project.build` collects build outputs after each target succeeds. `src` is a list of paths relative to the project workspace. `dst` is the local output root. mxrun copies each source into `<dst>/<platform>-<arch>/`; for example, `target/debug/example` becomes `target/platforms/GNU_Linux-x86_64/example`. Failed targets do not contribute collected output.
+
+To select files from directory sources instead of copying them recursively, add `files`. Its paths are relative to each directory source. Direct file sources continue to be copied normally:
+
+```yaml
+project:
+  build:
+    src:
+      - target/debug
+      - target/release/helper
+    files:
+      - app
+    dst: target/platforms
+```
+
+This collects `target/debug/app` as `target/platforms/<platform>-<arch>/debug/app`. Missing source paths and selected files are logged as skipped; existing paths that fail to transfer still fail collection for that target.
 
 Existing target-only config files remain valid:
 
@@ -67,6 +88,10 @@ targets:
 
 project:
   ignore: []
+  build:
+    src:
+      - build/stage/hello
+    dst: target/platforms
 ```
 
 That lets a first run start with a local-only config instead of aborting on a missing file.
