@@ -9,7 +9,6 @@ RELEASE_CFLAGS ?= -O2 -DNDEBUG -Wall -Wextra
 BUILD_DIR := build
 STAGE_DIR := $(BUILD_DIR)/stage
 DIST_DIR := $(BUILD_DIR)/dist
-MXRUN_DIR := $(BUILD_DIR)/.mxrun
 APP := hello
 
 define maybe_mxrun
@@ -29,19 +28,13 @@ endef
 
 devel:
 	$(call maybe_mxrun)
-	@mkdir -p $(STAGE_DIR) $(MXRUN_DIR)
+	@mkdir -p $(STAGE_DIR)
 	$(CC) $(DEBUG_CFLAGS) -v hello.c -o $(STAGE_DIR)/$(APP)
-	@printf '%s\n' \
-		'build/stage/hello' \
-		> $(MXRUN_DIR)/devel.paths
 
 release:
 	$(call maybe_mxrun)
-	@mkdir -p $(DIST_DIR) $(MXRUN_DIR)
+	@mkdir -p $(DIST_DIR)
 	$(CC) $(RELEASE_CFLAGS) hello.c -o $(DIST_DIR)/$(APP)
-	@printf '%s\n' \
-		'build/dist/hello' \
-		> $(MXRUN_DIR)/release.paths
 
 clean:
 	rm -rf $(BUILD_DIR)
