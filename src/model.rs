@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Deserializer, de::Error};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetMode {
     Local,
@@ -158,28 +160,97 @@ impl ResultMirrorPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MxrunConfig {
     targets: Vec<BuildTarget>,
+    ignores: Vec<String>,
 }
 
 impl MxrunConfig {
     pub fn parse(src: &str) -> Result<Self, String> {
-        Self::from_lines(
-            src.lines()
-                .enumerate()
-                .filter_map(Line::meaningful)
-                .map(Line::parse)
-                .collect::<Result<Vec<_>, _>>()?,
-        )
+        if Self::is_yaml(src) {
+            Self::from_yaml(src)
+        } else {
+            Self::from_legacy_lines(
+                src.lines()
+                    .enumerate()
+                    .filter_map(Line::meaningful)
+                    .map(Line::parse)
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        }
     }
 
     pub fn targets(&self) -> &[BuildTarget] {
         &self.targets
     }
 
-    fn from_lines(targets: Vec<BuildTarget>) -> Result<Self, String> {
+    pub fn ignores(&self) -> &[String] {
+        &self.ignores
+    }
+
+    fn from_legacy_lines(targets: Vec<BuildTarget>) -> Result<Self, String> {
         (!targets.is_empty())
-            .then_some(Self { targets })
+            .then_some(Self {
+                targets,
+                ignores: vec![],
+            })
             .ok_or_else(|| "mxrun config has no targets".to_string())
     }
+
+    fn from_yaml(src: &str) -> Result<Self, String> {
+        let config: YamlConfig =
+            serde_yaml::from_str(src).map_err(|err| format!("invalid YAML mxrun config: {err}"))?;
+        let targets = config
+            .targets
+            .iter()
+            .enumerate()
+            .map(|(index, target)| {
+                Line {
+                    lineno: index + 1,
+                    text: target,
+                }
+                .parse()
+                .map_err(|err| format!("invalid YAML target {}: {err}", index + 1))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        (!targets.is_empty())
+            .then_some(Self {
+                targets,
+                ignores: config.project.ignore,
+            })
+            .ok_or_else(|| "mxrun config has no targets".to_string())
+    }
+
+    fn is_yaml(src: &str) -> bool {
+        src.lines().map(str::trim).any(|line| {
+            !line.is_empty() && !line.starts_with('#') && (line == "targets:" || line == "project:")
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct YamlConfig {
+    targets: Vec<String>,
+    #[serde(default)]
+    project: ProjectConfig,
+}
+
+#[derive(Default, Deserialize)]
+struct ProjectConfig {
+    #[serde(default, deserialize_with = "deserialize_ignore_patterns")]
+    ignore: Vec<String>,
+}
+
+fn deserialize_ignore_patterns<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Vec::<serde_yaml::Value>::deserialize(deserializer)?
+        .into_iter()
+        .map(|value| match value {
+            serde_yaml::Value::String(pattern) => Ok(pattern),
+            _ => Err(D::Error::custom("ignore patterns must be strings")),
+        })
+        .collect()
 }
 
 struct Line<'a> {

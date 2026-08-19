@@ -246,6 +246,11 @@ impl ConfigFile {
     fn append_target_line_at(path: &PathBuf, line: &str) -> Result<(), String> {
         let mut text = Self::read_or_create(path)?;
 
+        if Self::is_yaml_config(&text) {
+            Self::append_yaml_target_line(&mut text, line)?;
+            return fs::write(path, text).map_err(|err| err.to_string());
+        }
+
         if text.lines().any(|existing| existing.trim() == line) {
             return Ok(());
         }
@@ -259,8 +264,46 @@ impl ConfigFile {
         fs::write(path, text).map_err(|err| err.to_string())
     }
 
+    fn append_yaml_target_line(text: &mut String, line: &str) -> Result<(), String> {
+        if text
+            .lines()
+            .any(|existing| existing.trim() == format!("- {line}"))
+        {
+            return Ok(());
+        }
+
+        let mut lines = text.lines().map(str::to_string).collect::<Vec<_>>();
+        if let Some(index) = lines
+            .iter()
+            .position(|existing| existing.trim() == "targets:")
+        {
+            let insertion = lines[index + 1..]
+                .iter()
+                .position(|existing| {
+                    let trimmed = existing.trim();
+                    !trimmed.is_empty()
+                        && !trimmed.starts_with('#')
+                        && !existing.chars().next().is_some_and(char::is_whitespace)
+                })
+                .map(|offset| index + 1 + offset)
+                .unwrap_or(lines.len());
+            lines.insert(insertion, format!("  - {line}"));
+        } else {
+            lines.splice(0..0, ["targets:".to_string(), format!("  - {line}")]);
+        }
+
+        *text = format!("{}\n", lines.join("\n"));
+        Ok(())
+    }
+
+    fn is_yaml_config(text: &str) -> bool {
+        text.lines().map(str::trim).any(|line| {
+            !line.is_empty() && !line.starts_with('#') && (line == "targets:" || line == "project:")
+        })
+    }
+
     fn default_contents() -> &'static str {
-        "local\n"
+        "targets:\n  - local\n\nproject:\n  ignore: []\n"
     }
 }
 
@@ -403,10 +446,10 @@ mod main_ut {
 
         let text = ConfigFile::read_or_create(&path).expect("missing config should be created");
 
-        assert_eq!(text, "local\n");
+        assert_eq!(text, "targets:\n  - local\n\nproject:\n  ignore: []\n");
         assert_eq!(
             fs::read_to_string(&path).expect("created config should exist"),
-            "local\n"
+            "targets:\n  - local\n\nproject:\n  ignore: []\n"
         );
     }
 
@@ -435,6 +478,25 @@ mod main_ut {
         assert_eq!(
             fs::read_to_string(&path).expect("config should be readable"),
             "local\nGNU/Linux x86_64 bo@example:/home/bo/work/mxrun\n"
+        );
+    }
+
+    #[test]
+    fn append_target_line_adds_to_yaml_target_list() {
+        let temp = TempDir::new("mxrun-main-ut");
+        let path = temp.path().join("mxrun.yaml");
+        fs::write(
+            &path,
+            "targets:\n  - local\n\nproject:\n  ignore:\n    - /generated/\n",
+        )
+        .expect("fixture config should be written");
+
+        ConfigFile::append_target_line_at(&path, "GNU/Linux x86_64 bo@example:work/tree")
+            .expect("YAML target should be added");
+
+        assert_eq!(
+            fs::read_to_string(&path).expect("config should be readable"),
+            "targets:\n  - local\n\n  - GNU/Linux x86_64 bo@example:work/tree\nproject:\n  ignore:\n    - /generated/\n"
         );
     }
 
