@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use crate::model::{BuildTarget, MxrunConfig, ResultMirrorPlan};
+use crate::model::{BuildOutputPlan, BuildTarget, MxrunConfig, ResultMirrorPlan};
 use portable_pty::{CommandBuilder, PtySize, PtySystem, native_pty_system};
 
 pub struct BuildPlan {
@@ -27,14 +27,14 @@ impl BuildPlan {
                 .targets()
                 .iter()
                 .map(|target| {
-                    BuildJob::build_with_ignores(
+                    BuildJob::build_with_config(
                         target,
                         entry,
                         root_dir,
                         log_root,
                         local_make,
                         &mirror_plan,
-                        config.ignores(),
+                        config,
                     )
                 })
                 .collect(),
@@ -63,6 +63,7 @@ pub struct BuildJob {
     root_dir: PathBuf,
     mirror_plan: ResultMirrorPlan,
     ignores: Vec<String>,
+    build_output: Option<BuildOutputPlan>,
     mode: RunMode,
 }
 
@@ -81,6 +82,7 @@ impl Clone for BuildJob {
             root_dir: self.root_dir.clone(),
             mirror_plan: self.mirror_plan.clone(),
             ignores: self.ignores.clone(),
+            build_output: self.build_output.clone(),
             mode: self.mode,
         }
     }
@@ -102,6 +104,7 @@ impl BuildJob {
             root_dir,
             mirror_plan,
             ignores: vec![],
+            build_output: None,
             mode,
         }
     }
@@ -115,25 +118,25 @@ impl BuildJob {
         local_make: &str,
         mirror_plan: &ResultMirrorPlan,
     ) -> Self {
-        Self::build_with_ignores(
+        Self::build_with_config(
             target,
             entry,
             root_dir,
             log_root,
             local_make,
             mirror_plan,
-            &[],
+            &MxrunConfig::parse("local\n").expect("test config should parse"),
         )
     }
 
-    fn build_with_ignores(
+    fn build_with_config(
         target: &BuildTarget,
         entry: &str,
         root_dir: &Path,
         log_root: &Path,
         local_make: &str,
         mirror_plan: &ResultMirrorPlan,
-        ignores: &[String],
+        config: &MxrunConfig,
     ) -> Self {
         Self::new(
             target.clone(),
@@ -143,11 +146,17 @@ impl BuildJob {
             mirror_plan.clone(),
             RunMode::Run,
         )
-        .with_ignores(ignores)
+        .with_ignores(config.ignores())
+        .with_build_output(config.build_output())
     }
 
     fn with_ignores(mut self, ignores: &[String]) -> Self {
         self.ignores = ignores.to_vec();
+        self
+    }
+
+    fn with_build_output(mut self, build_output: Option<&BuildOutputPlan>) -> Self {
+        self.build_output = build_output.cloned();
         self
     }
 
@@ -191,7 +200,8 @@ impl BuildJob {
         self.prepare().and_then(|_| {
             self.run_build().and_then(|status| {
                 if status == 0 {
-                    self.run_mirror()
+                    self.collect_build_output()
+                        .and_then(|_| self.run_mirror())
                         .map(|_| JobResult::new(self.log_path.clone(), status))
                 } else {
                     Ok(JobResult::new(self.log_path.clone(), status))
@@ -233,8 +243,17 @@ impl BuildJob {
         }
     }
 
+    pub(crate) fn collect_build_output(&self) -> Result<(), String> {
+        self.build_output
+            .as_ref()
+            .map(|plan| {
+                BuildOutputCollector::new(&self.root_dir, &self.target, plan).run(&self.log_path)
+            })
+            .unwrap_or(Ok(()))
+    }
+
     pub(crate) fn should_mirror_results(&self) -> bool {
-        self.mirror_plan.is_enabled()
+        self.mirror_plan.is_enabled() || self.build_output.is_some()
     }
 }
 
@@ -323,6 +342,193 @@ impl BuildCommand {
             ],
             None,
         )
+    }
+}
+
+struct BuildOutputCollector<'a> {
+    root_dir: &'a Path,
+    target: &'a BuildTarget,
+    plan: &'a BuildOutputPlan,
+}
+
+enum BuildOutputSource {
+    Directory,
+    File,
+    Missing,
+}
+
+impl<'a> BuildOutputCollector<'a> {
+    fn new(root_dir: &'a Path, target: &'a BuildTarget, plan: &'a BuildOutputPlan) -> Self {
+        Self {
+            root_dir,
+            target,
+            plan,
+        }
+    }
+
+    fn run(&self, log_path: &Path) -> Result<(), String> {
+        let destination = self.destination();
+        fs::create_dir_all(&destination)
+            .map_err(|err| format!("mxrun: failed to create build output directory: {err}"))?;
+
+        self.transfers(&destination, log_path)?
+            .into_iter()
+            .try_for_each(|(source, target)| {
+                fs::create_dir_all(&target).map_err(|err| {
+                    format!("mxrun: failed to create build output directory: {err}")
+                })?;
+                LoggedCommand::new("rsync", self.rsync_args(&source, &target))
+                    .status(log_path)
+                    .and_then(|status| {
+                        (status == 0)
+                            .then_some(())
+                            .ok_or_else(|| "mxrun: failed to collect build output".to_string())
+                    })
+            })
+    }
+
+    fn transfers(
+        &self,
+        destination: &Path,
+        log_path: &Path,
+    ) -> Result<Vec<(PathBuf, PathBuf)>, String> {
+        self.plan
+            .sources()
+            .iter()
+            .try_fold(vec![], |mut transfers, source| {
+                match self.source_kind(source)? {
+                    BuildOutputSource::Missing => self.log_skip(source, log_path)?,
+                    BuildOutputSource::Directory if self.plan.selects_files() => {
+                        let directory = source
+                            .file_name()
+                            .expect("configured build source always has a file name");
+                        self.plan.files().iter().try_for_each(|file| {
+                            let selected = source.join(file);
+                            match self.source_kind(&selected)? {
+                                BuildOutputSource::File => {
+                                    transfers.push((
+                                        selected,
+                                        destination
+                                            .join(directory)
+                                            .join(file.parent().unwrap_or_else(|| Path::new(""))),
+                                    ));
+                                    Ok(())
+                                }
+                                BuildOutputSource::Directory => {
+                                    self.log_not_file(&selected, log_path)
+                                }
+                                BuildOutputSource::Missing => self.log_skip(&selected, log_path),
+                            }
+                        })?;
+                    }
+                    BuildOutputSource::Directory | BuildOutputSource::File => {
+                        transfers.push((source.clone(), destination.to_path_buf()));
+                    }
+                }
+                Ok(transfers)
+            })
+    }
+
+    fn source_kind(&self, source: &Path) -> Result<BuildOutputSource, String> {
+        if self.target.is_local() {
+            match fs::metadata(self.root_dir.join(source)) {
+                Ok(metadata) if metadata.is_dir() => Ok(BuildOutputSource::Directory),
+                Ok(_) => Ok(BuildOutputSource::File),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    Ok(BuildOutputSource::Missing)
+                }
+                Err(err) => Err(format!("mxrun: failed to inspect build output: {err}")),
+            }
+        } else {
+            let remote_source = format!("{}/{}", self.target.remote_path(), source.display());
+            Command::new("ssh")
+                .args([
+                    "-o",
+                    "StrictHostKeyChecking=accept-new",
+                    "-o",
+                    "UpdateHostKeys=yes",
+                    self.target.host(),
+                    &format!(
+                        "if test -d {}; then exit 0; elif test -e {}; then exit 1; else exit 2; fi",
+                        Self::shell_quote(&remote_source),
+                        Self::shell_quote(&remote_source),
+                    ),
+                ])
+                .status()
+                .map_err(|err| format!("mxrun: failed to inspect remote build output: {err}"))
+                .and_then(|status| match status.code() {
+                    Some(0) => Ok(BuildOutputSource::Directory),
+                    Some(1) => Ok(BuildOutputSource::File),
+                    Some(2) => Ok(BuildOutputSource::Missing),
+                    _ => Err("mxrun: failed to inspect remote build output".to_string()),
+                })
+        }
+    }
+
+    fn log_skip(&self, source: &Path, log_path: &Path) -> Result<(), String> {
+        LogAppendFile::open(log_path).and_then(|mut log_file| {
+            log_file.write_text(&format!("no {}, skipping\n", source.display()))
+        })
+    }
+
+    fn log_not_file(&self, source: &Path, log_path: &Path) -> Result<(), String> {
+        LogAppendFile::open(log_path).and_then(|mut log_file| {
+            log_file.write_text(&format!("{} is not a file, skipping\n", source.display()))
+        })
+    }
+
+    fn shell_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+
+    fn destination(&self) -> PathBuf {
+        let root = self.plan.destination();
+        let root = if root.is_absolute() {
+            root.to_path_buf()
+        } else {
+            self.root_dir.join(root)
+        };
+        root.join(self.platform_dir())
+    }
+
+    fn platform_dir(&self) -> String {
+        format!(
+            "{}-{}",
+            Self::path_label(self.target.os()),
+            Self::path_label(self.target.arch())
+        )
+    }
+
+    fn path_label(value: &str) -> String {
+        value
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    }
+
+    fn rsync_args(&self, source: &Path, destination: &Path) -> Vec<String> {
+        let source = if self.target.is_local() {
+            self.root_dir.join(source).display().to_string()
+        } else {
+            format!(
+                "{}:{}/{}",
+                self.target.host(),
+                self.target.remote_path(),
+                source.display()
+            )
+        };
+
+        vec![
+            "-az".to_string(),
+            source,
+            format!("{}/", destination.display()),
+        ]
     }
 }
 
@@ -1044,11 +1250,15 @@ impl LogCapture {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
-    use crate::model::BuildTarget;
+    use crate::model::{BuildTarget, MxrunConfig};
 
-    use super::RemoteSync;
+    use super::{BuildOutputCollector, RemoteSync};
 
     #[test]
     fn rsync_args_include_configured_ignores_once() {
@@ -1073,5 +1283,115 @@ mod tests {
         );
         assert_eq!(args[args.len() - 2], "/tmp/demo/");
         assert_eq!(args[args.len() - 1], "builder:work/demo/");
+    }
+
+    #[test]
+    fn build_output_uses_a_platform_directory_for_remote_sources() {
+        let config = MxrunConfig::parse(
+            "targets:\n  - GNU/Linux x86_64 builder:work/demo\nproject:\n  build:\n    src:\n      - target/debug/example\n    dst: target/platforms\n",
+        )
+        .expect("config should parse");
+        let target = &config.targets()[0];
+        let collector = BuildOutputCollector::new(
+            Path::new("/tmp/demo"),
+            target,
+            config
+                .build_output()
+                .expect("build output should be configured"),
+        );
+
+        assert_eq!(
+            collector.destination(),
+            Path::new("/tmp/demo/target/platforms/GNU_Linux-x86_64")
+        );
+        assert_eq!(
+            collector.rsync_args(Path::new("target/debug/example"), &collector.destination()),
+            [
+                "-az",
+                "builder:work/demo/target/debug/example",
+                "/tmp/demo/target/platforms/GNU_Linux-x86_64/",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_output_uses_local_workspace_sources() {
+        let config = MxrunConfig::parse(
+            "targets:\n  - local\nproject:\n  build:\n    src:\n      - target/debug/example\n    dst: target/platforms\n",
+        )
+        .expect("config should parse");
+        let target = &config.targets()[0];
+        let collector = BuildOutputCollector::new(
+            Path::new("/tmp/demo"),
+            target,
+            config
+                .build_output()
+                .expect("build output should be configured"),
+        );
+
+        assert_eq!(
+            collector.rsync_args(Path::new("target/debug/example"), &collector.destination()),
+            [
+                "-az",
+                "/tmp/demo/target/debug/example",
+                "/tmp/demo/target/platforms/GNU_Linux-x86_64/",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_output_copies_a_successful_local_build_artifact() {
+        let root = temp_dir("mxrun-build-output");
+        let source = root.join("target/debug/example");
+        fs::create_dir_all(source.parent().expect("source should have a parent"))
+            .expect("source directory should be created");
+        fs::write(&source, "artifact").expect("artifact should be written");
+        fs::write(root.join("target/debug/not-collected"), "other")
+            .expect("unselected artifact should be written");
+
+        let config = MxrunConfig::parse(
+            "targets:\n  - local\nproject:\n  build:\n    src:\n      - target/debug\n      - target/release\n    files:\n      - example\n      - missing\n    dst: target/platforms\n",
+        )
+        .expect("config should parse");
+        let collector = BuildOutputCollector::new(
+            &root,
+            &config.targets()[0],
+            config
+                .build_output()
+                .expect("build output should be configured"),
+        );
+
+        collector
+            .run(&root.join("collect.log"))
+            .expect("artifact should be collected");
+
+        assert_eq!(
+            fs::read_to_string(root.join("target/platforms/GNU_Linux-x86_64/debug/example"))
+                .expect("collected artifact should exist"),
+            "artifact"
+        );
+        assert!(
+            !root
+                .join("target/platforms/GNU_Linux-x86_64/debug/not-collected")
+                .exists()
+        );
+        let log =
+            fs::read_to_string(root.join("collect.log")).expect("collection log should exist");
+        assert!(log.contains("no target/debug/missing, skipping"));
+        assert!(log.contains("no target/release, skipping"));
+        fs::remove_dir_all(root).ok();
+    }
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "{prefix}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock should advance")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&path).expect("temporary directory should be created");
+        path
     }
 }
