@@ -24,21 +24,30 @@ The tool is intentionally separate from project-specific build logic. It should 
 
 # TARGET CONFIG
 
-The target config file is plain text. Each line describes one target in the following form:
+The target config file is YAML. Targets use the following compact form:
+
+```yaml
+targets:
+  - local
+  - FreeBSD amd64 builder@freebsd-vm:work/example-mxrun
+
+project:
+  ignore:
+    - /generated/
+    - '*.cache'
+```
+
+Each remote target entry has this form:
 
 ```text
 <uname -o> <uname -m> [user@]host:/destination
 ```
 
-Example:
-
-```text
-local
-FreeBSD amd64 builder@freebsd-vm:work/example-mxrun
-GNU/Linux x86_64 builder@linux-vm:work/example-mxrun
-```
-
 The special value `local` means that the current machine should also take part in the run.
+
+`project.ignore` entries are passed to `rsync` as exclusion patterns. They can name files, directories, or globs; a leading `/` anchors a pattern at the project root. They use rsync matching semantics and do not remove files already on remote targets. Unknown `project` keys are reserved for future options.
+
+Legacy target-only configs remain supported.
 
 # PRODUCER CONTRACT
 
