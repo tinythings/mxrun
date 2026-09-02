@@ -55,6 +55,13 @@ pub fn cli() -> Command {
                         .long("label")
                         .value_name("TEXT")
                         .help("Show a label in the top-right corner of the build screen"),
+                )
+                .arg(
+                    Arg::new("make-var")
+                        .long("make-var")
+                        .value_name("NAME=VALUE")
+                        .action(ArgAction::Append)
+                        .help("Forward a Make variable to every build entry; may be repeated"),
                 ),
         )
         .next_help_heading("Other")
@@ -113,6 +120,16 @@ pub fn label(am: &ArgMatches) -> Option<String> {
     am.subcommand_matches("run")
         .and_then(|sub| sub.get_one::<String>("label"))
         .cloned()
+}
+
+pub fn make_vars(am: &ArgMatches) -> Vec<String> {
+    am.subcommand_matches("run")
+        .map(|sub| {
+            sub.get_many::<String>("make-var")
+                .map(|values| values.cloned().collect())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
 }
 
 pub fn add_host(am: &ArgMatches) -> Option<String> {

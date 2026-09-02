@@ -25,7 +25,7 @@ use clap::ArgMatches;
 
 use app::MxrunApp;
 use model::{MxrunConfig, ResultMirrorPlan};
-use runner::BuildPlan;
+use runner::{BuildPlan, MakeVariable};
 
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -57,6 +57,7 @@ struct RunOptions {
     mirror_root: PathBuf,
     wrap_lines: bool,
     label: Option<String>,
+    make_vars: Vec<MakeVariable>,
 }
 
 impl Command {
@@ -101,6 +102,7 @@ impl Command {
                 &LogRoot::path(options.entry()),
                 &LocalMake::name(),
                 options.mirror_plan(),
+                &options.make_vars,
             ),
             options.wrap_lines(),
             options.label(),
@@ -155,6 +157,11 @@ impl RunOptions {
             mirror_root: mirror_root.unwrap_or_else(Self::default_mirror_root),
             wrap_lines: clidef::wrap_lines(am),
             label: clidef::label(am),
+            make_vars: clidef::make_vars(am)
+                .into_iter()
+                .map(MakeVariable::parse)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap_or_else(|err| Fatal::raise(&err)),
         }
     }
 

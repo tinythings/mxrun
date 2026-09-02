@@ -248,6 +248,7 @@ impl Fixture {
             std::path::Path::new("/tmp/logs"),
             "make",
             ResultMirrorPlan::disabled(std::path::PathBuf::from("/tmp/mxrun"), "dev"),
+            &[],
         )
     }
 }

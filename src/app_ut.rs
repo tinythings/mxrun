@@ -111,6 +111,7 @@ fn job_state_updates_rendered_lines_for_error_events() {
         &tmp.join("logs"),
         "make",
         ResultMirrorPlan::disabled(tmp.join("mirror"), "devel"),
+        &[],
     );
     let mut st = JobState::from_job(&plan.jobs()[0]);
 

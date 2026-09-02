@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     model::{BuildTarget, MxrunConfig, ResultMirrorPlan},
-    runner::{BuildCommand, BuildJob, BuildPlan},
+    runner::{BuildCommand, BuildJob, BuildPlan, MakeVariable},
 };
 
 #[test]
@@ -72,6 +72,7 @@ fn build_plan_creates_one_job_per_target_with_stable_log_paths() {
         temp.path(),
         "make",
         ResultMirrorPlan::disabled(PathBuf::from("/tmp/mxrun"), "modules-dev"),
+        &[],
     );
 
     assert_eq!(plan.jobs().len(), 2);
@@ -81,6 +82,110 @@ fn build_plan_creates_one_job_per_target_with_stable_log_paths() {
         temp.path()
             .join("192.168.122.122_work_sysinspect-mxrun.log")
     );
+}
+
+#[test]
+fn make_variable_parses_plain_and_special_values() {
+    assert!(MakeVariable::parse("HOST=deployer@example.test".to_string()).is_ok());
+    assert!(MakeVariable::parse("MESSAGE=it's got 'spaces'".to_string()).is_ok());
+}
+
+#[test]
+fn make_variable_rejects_invalid_assignments() {
+    assert_eq!(
+        MakeVariable::parse("HOST".to_string()).unwrap_err(),
+        "mxrun: --make-var must use NAME=VALUE"
+    );
+    assert_eq!(
+        MakeVariable::parse("=deployer".to_string()).unwrap_err(),
+        "mxrun: --make-var NAME must be a Make identifier"
+    );
+    assert_eq!(
+        MakeVariable::parse("1HOST=x".to_string()).unwrap_err(),
+        "mxrun: --make-var NAME must be a Make identifier"
+    );
+    assert_eq!(
+        MakeVariable::parse("HOST-NAME=x".to_string()).unwrap_err(),
+        "mxrun: --make-var NAME must be a Make identifier"
+    );
+}
+
+#[test]
+fn make_variable_accepts_permissive_names_and_empty_values() {
+    assert!(MakeVariable::parse("HOST=".to_string()).is_ok());
+    assert!(MakeVariable::parse("_HOST=x".to_string()).is_ok());
+    assert!(MakeVariable::parse("HOST1=x".to_string()).is_ok());
+}
+
+#[test]
+fn local_command_appends_quoted_make_vars_after_entry() {
+    let vars = vec![
+        MakeVariable::parse("HOST=deployer@example.test".to_string())
+            .expect("assignment should parse"),
+        MakeVariable::parse("BUILD_KIND=debug".to_string()).expect("assignment should parse"),
+        MakeVariable::parse("MESSAGE=it's got 'spaces'".to_string())
+            .expect("assignment should parse"),
+    ];
+
+    let command = BuildCommand::for_target(
+        &BuildTarget::local(),
+        "_push-dev",
+        Path::new("/tmp/kenpit"),
+        "make",
+        &vars,
+    );
+
+    assert_eq!(command.program(), "sh");
+    assert_eq!(command.cwd(), Some(Path::new("/tmp/kenpit")));
+    assert_eq!(
+        command.args(),
+        [
+            "-lc",
+            "MXRUN_CONFIG= MXRUN_LOCAL_MAKE= make _push-dev 'HOST=deployer@example.test' 'BUILD_KIND=debug' 'MESSAGE=it'\\''s got '\\''spaces'\\'''"
+        ]
+    );
+}
+
+#[test]
+fn remote_command_appends_quoted_make_vars_after_entry() {
+    let vars = vec![
+        MakeVariable::parse("HOST=deployer@example.test".to_string())
+            .expect("assignment should parse"),
+        MakeVariable::parse("BUILD_KIND=debug".to_string()).expect("assignment should parse"),
+    ];
+
+    let command = BuildCommand::for_target(
+        &BuildTarget::remote("FreeBSD", "amd64", "192.168.122.122:work/sysinspect-mxrun"),
+        "_push-dev",
+        Path::new("/tmp/sysinspect"),
+        "make",
+        &vars,
+    );
+
+    assert_eq!(command.program(), "ssh");
+    assert_eq!(command.args()[0], "-o");
+    assert_eq!(command.args()[1], "StrictHostKeyChecking=accept-new");
+    assert_eq!(command.args()[2], "-o");
+    assert_eq!(command.args()[3], "UpdateHostKeys=yes");
+    assert_eq!(command.args()[4], "-tt");
+    assert_eq!(command.args()[5], "192.168.122.122");
+    assert_eq!(
+        command.args()[6],
+        "cd 'work/sysinspect-mxrun' && gmake _push-dev 'HOST=deployer@example.test' 'BUILD_KIND=debug'"
+    );
+}
+
+#[test]
+fn remote_command_without_vars_keeps_existing_gmake_dev_form() {
+    let command = BuildCommand::for_target(
+        &BuildTarget::remote("FreeBSD", "amd64", "192.168.122.122:work/sysinspect-mxrun"),
+        "dev",
+        Path::new("/tmp/sysinspect"),
+        "make",
+        &[],
+    );
+
+    assert_eq!(command.args()[6], "cd 'work/sysinspect-mxrun' && gmake dev");
 }
 
 struct TempDir {

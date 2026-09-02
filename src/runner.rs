@@ -21,22 +21,22 @@ impl BuildPlan {
         log_root: &Path,
         local_make: &str,
         mirror_plan: ResultMirrorPlan,
+        make_vars: &[MakeVariable],
     ) -> Self {
+        let request = BuildRequest {
+            entry,
+            root_dir,
+            log_root,
+            local_make,
+            mirror_plan: &mirror_plan,
+            config,
+            make_vars,
+        };
         Self {
             jobs: config
                 .targets()
                 .iter()
-                .map(|target| {
-                    BuildJob::build_with_config(
-                        target,
-                        entry,
-                        root_dir,
-                        log_root,
-                        local_make,
-                        &mirror_plan,
-                        config,
-                    )
-                })
+                .map(|target| BuildJob::build_with_config(target, &request))
                 .collect(),
         }
     }
@@ -65,6 +65,16 @@ pub struct BuildJob {
     ignores: Vec<String>,
     build_output: Option<BuildOutputPlan>,
     mode: RunMode,
+}
+
+struct BuildRequest<'a> {
+    entry: &'a str,
+    root_dir: &'a Path,
+    log_root: &'a Path,
+    local_make: &'a str,
+    mirror_plan: &'a ResultMirrorPlan,
+    config: &'a MxrunConfig,
+    make_vars: &'a [MakeVariable],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -118,36 +128,38 @@ impl BuildJob {
         local_make: &str,
         mirror_plan: &ResultMirrorPlan,
     ) -> Self {
+        let config = MxrunConfig::parse("local\n").expect("test config should parse");
         Self::build_with_config(
             target,
-            entry,
-            root_dir,
-            log_root,
-            local_make,
-            mirror_plan,
-            &MxrunConfig::parse("local\n").expect("test config should parse"),
+            &BuildRequest {
+                entry,
+                root_dir,
+                log_root,
+                local_make,
+                mirror_plan,
+                config: &config,
+                make_vars: &[],
+            },
         )
     }
 
-    fn build_with_config(
-        target: &BuildTarget,
-        entry: &str,
-        root_dir: &Path,
-        log_root: &Path,
-        local_make: &str,
-        mirror_plan: &ResultMirrorPlan,
-        config: &MxrunConfig,
-    ) -> Self {
+    fn build_with_config(target: &BuildTarget, request: &BuildRequest) -> Self {
         Self::new(
             target.clone(),
-            BuildCommand::for_target(target, entry, root_dir, local_make),
-            log_root.join(format!("{}.log", target.log_key())),
-            root_dir.to_path_buf(),
-            mirror_plan.clone(),
+            BuildCommand::for_target(
+                target,
+                request.entry,
+                request.root_dir,
+                request.local_make,
+                request.make_vars,
+            ),
+            request.log_root.join(format!("{}.log", target.log_key())),
+            request.root_dir.to_path_buf(),
+            request.mirror_plan.clone(),
             RunMode::Run,
         )
-        .with_ignores(config.ignores())
-        .with_build_output(config.build_output())
+        .with_ignores(request.config.ignores())
+        .with_build_output(request.config.build_output())
     }
 
     fn with_ignores(mut self, ignores: &[String]) -> Self {
@@ -257,6 +269,37 @@ impl BuildJob {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MakeVariable {
+    assignment: String,
+}
+
+impl MakeVariable {
+    pub fn parse(assignment: String) -> Result<Self, String> {
+        let (name, _) = assignment
+            .split_once('=')
+            .ok_or_else(|| "mxrun: --make-var must use NAME=VALUE".to_string())?;
+        if Self::is_valid_name(name) {
+            Ok(Self { assignment })
+        } else {
+            Err("mxrun: --make-var NAME must be a Make identifier".to_string())
+        }
+    }
+
+    fn is_valid_name(name: &str) -> bool {
+        let mut chars = name.chars();
+        match chars.next() {
+            Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
+            _ => return false,
+        }
+        chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    }
+
+    fn shell_argument(&self) -> String {
+        format!("'{}'", self.assignment.replace('\'', "'\\''"))
+    }
+}
+
 pub struct BuildCommand {
     program: String,
     args: Vec<String>,
@@ -287,11 +330,12 @@ impl BuildCommand {
         entry: &str,
         root_dir: &Path,
         local_make: &str,
+        make_vars: &[MakeVariable],
     ) -> Self {
         if target.is_local() {
-            Self::local(entry, root_dir, local_make)
+            Self::local(entry, root_dir, local_make, make_vars)
         } else {
-            Self::remote(target, entry, root_dir)
+            Self::remote(target, entry, root_dir, make_vars)
         }
     }
 
@@ -311,18 +355,28 @@ impl BuildCommand {
         PtySession::new(self)?.run(log_path)
     }
 
-    fn local(entry: &str, root_dir: &Path, local_make: &str) -> Self {
+    fn local(entry: &str, root_dir: &Path, local_make: &str, make_vars: &[MakeVariable]) -> Self {
         Self::new(
             "sh",
             vec![
                 "-lc".to_string(),
-                format!("MXRUN_CONFIG= MXRUN_LOCAL_MAKE= {} {}", local_make, entry),
+                format!(
+                    "MXRUN_CONFIG= MXRUN_LOCAL_MAKE= {} {}{}",
+                    local_make,
+                    entry,
+                    Self::make_var_args(make_vars)
+                ),
             ],
             Some(root_dir.to_path_buf()),
         )
     }
 
-    fn remote(target: &BuildTarget, entry: &str, root_dir: &Path) -> Self {
+    fn remote(
+        target: &BuildTarget,
+        entry: &str,
+        root_dir: &Path,
+        make_vars: &[MakeVariable],
+    ) -> Self {
         let _ = root_dir;
         Self::new(
             "ssh",
@@ -334,14 +388,22 @@ impl BuildCommand {
                 "-tt".to_string(),
                 target.host().to_string(),
                 format!(
-                    "cd '{}' && {} {}",
+                    "cd '{}' && {} {}{}",
                     target.remote_path(),
                     target.make_cmd(),
-                    entry
+                    entry,
+                    Self::make_var_args(make_vars)
                 ),
             ],
             None,
         )
+    }
+
+    fn make_var_args(make_vars: &[MakeVariable]) -> String {
+        make_vars
+            .iter()
+            .map(|variable| format!(" {}", variable.shell_argument()))
+            .collect::<String>()
     }
 }
 
